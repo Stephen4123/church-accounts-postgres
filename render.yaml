@@ -17,14 +17,4 @@ services:
       - key: AUTO_SEED
         value: "true"
       - key: DATABASE_URL
-        fromDatabase:
-          name: church-accounts-db
-          property: connectionString
-
-databases:
-  # Managed PostgreSQL Database on Render
-  - name: church-accounts-db
-    databaseName: church_accounts
-    user: church_admin
-    plan: free
-    region: oregon
+        value: postgresql://neondb_owner:npg_8viZAFDn2SRz@ep-misty-scene-b4szd7kv-pooler.c-6.us-east-2.aws.neon.tech/neondb?sslmode=require

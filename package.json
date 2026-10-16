@@ -4,7 +4,7 @@
   "description": "IPC Horeb Church Accounts Management & Financial Portal in TypeScript with PostgreSQL & Render Deployment",
   "main": "dist/server.js",
   "scripts": {
-    "build": "tsc && node -e \"const fs=require('fs'); fs.cpSync('public', 'dist/public', {recursive:true});\"",
+    "build": "tsc && node -e \"const fs=require('fs'); fs.cpSync('public', 'dist/public', {recursive:true}); fs.mkdirSync('dist/db', {recursive:true}); if(fs.existsSync('src/db/schema.sql')) fs.copyFileSync('src/db/schema.sql', 'dist/db/schema.sql'); if(fs.existsSync('src/db/real_seed.sql')) fs.copyFileSync('src/db/real_seed.sql', 'dist/db/real_seed.sql');\"",
     "start": "node dist/server.js",
     "dev": "ts-node src/server.ts",
     "migrate": "ts-node src/db/migrate.ts"

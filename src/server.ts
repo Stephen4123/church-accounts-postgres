@@ -55,9 +55,10 @@ app.get('*', (req: Request, res: Response) => {
 async function startServer() {
   try {
     await migrate();
-    app.listen(PORT, () => {
+    const listenPort = Number(PORT) || 5000;
+    app.listen(listenPort, '0.0.0.0', () => {
       console.log(`====================================================`);
-      console.log(`🚀 IPC Horeb Church Accounts Portal running on http://localhost:${PORT}`);
+      console.log(`🚀 IPC Horeb Church Accounts Portal running on http://0.0.0.0:${listenPort}`);
       console.log(`📁 Static files served from: ${publicPath}`);
       console.log(`🌐 Ready for Render Deployment with PostgreSQL`);
       console.log(`====================================================`);

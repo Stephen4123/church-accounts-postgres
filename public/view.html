@@ -1,0 +1,1342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+  <title>View Document - IPC Horeb Church</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manjari:wght@400;700&family=Noto+Sans+Malayalam:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    html { font-size: 12.8px; }
+    :root {
+      --primary: #059669;
+      --bg: #f8fafc;
+      --card: #ffffff;
+      --text: #1e293b;
+      --border: #e2e8f0;
+      --font-body: 'Manjari', 'Segoe UI', system-ui, sans-serif;
+
+      --bg-white: #ffffff;
+      --bg-slate-50: #f8fafc;
+      --bg-slate-100: #f1f5f9;
+      --bg-slate-200: #e2e8f0;
+      --border-slate-200: #e2e8f0;
+      --border-slate-300: #cbd5e1;
+
+      --text-white: #ffffff;
+      --text-slate-500: #64748b;
+      --text-slate-600: #475569;
+      --text-slate-700: #334155;
+      --text-slate-800: #1e293b;
+      --text-slate-900: #0f172a;
+    }
+    body {
+      font-family: var(--font-body);
+      background: var(--bg);
+      color: var(--text);
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+    }
+    .toolbar {
+      width: 100%;
+      background: var(--bg-white);
+      padding: 16px 20px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+      display: flex;
+      justify-content: center;
+      gap: 12px;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .btn {
+      padding: 10px 18px;
+      border: none;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 0.95rem;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      transition: all 0.2s;
+    }
+    .btn-primary { background: #2563eb; color: #ffffff; }
+    .btn-primary:hover { background: #1d4ed8; }
+    .btn-secondary { background: #10b981; color: #ffffff; }
+    .btn-secondary:hover { background: #059669; }
+    
+    #renderArea {
+      width: 100%;
+      display: flex;
+      justify-content: center;
+      overflow: hidden;
+      padding-top: 20px;
+      padding-bottom: 20px;
+    }
+
+    .document-container {
+      margin: 40px 20px;
+      background: var(--card);
+      border-radius: 12px;
+      box-shadow: 0 10px 25px -5px rgba(0,0,0,0.1);
+      overflow: hidden;
+      width: 100%;
+      max-width: 800px;
+      margin-bottom: 20px;
+    }
+
+    @media (max-width: 1024px) {
+      #printContainer { zoom: 0.6; }
+    }
+    @media (max-width: 768px) {
+      #printContainer { zoom: 0.48; }
+    }
+    @media (max-width: 600px) {
+      #printContainer { zoom: 0.42; }
+    }
+    @media (max-width: 480px) {
+      #printContainer { zoom: 0.35; }
+    }
+    @media (max-width: 400px) {
+      #printContainer { zoom: 0.32; }
+    }
+
+    .print-area {
+      padding: 40px;
+      background: var(--bg-white);
+      color: #000000;
+      position: relative;
+    }
+    .print-area.receipt { background: #cce3d0; }
+    .print-area.payment { background: #fffae6; }
+    .print-area.ledger { background: var(--bg-white); }
+
+    .church-header {
+      text-align: center;
+      border-bottom: 2px solid #000;
+      padding-bottom: 15px;
+      margin-bottom: 20px;
+    }
+    .church-title {
+      font-size: 26px;
+      font-weight: 800;
+      margin: 0 0 5px 0;
+      font-family: Georgia, serif;
+    }
+    .church-address {
+      font-size: 16px;
+      color: var(--text-slate-700);
+      margin: 0;
+    }
+    .doc-type-badge {
+      display: inline-block;
+      background: #0f172a;
+      color: #ffffff;
+      padding: 6px 20px;
+      font-weight: bold;
+      border-radius: 4px;
+      margin-top: 15px;
+      letter-spacing: 1px;
+    }
+    
+    .row-between { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 20px; }
+    .label-text { font-weight: normal; color: var(--text-slate-600); font-size: 14px; }
+    .value-text { font-weight: bold; font-size: 18px; color: #000; }
+    
+    .table { width: 100%; border-collapse: collapse; margin-top: 20px; margin-bottom: 20px; }
+    .table th, .table td { border: 1px solid #000; padding: 10px 15px; text-align: left; }
+    .table th { background: rgba(255,255,255,0.4); font-weight: bold; text-align: center; }
+    .table td.amt { text-align: right; font-weight: bold; font-family: monospace; font-size: 16px; }
+    
+    .footer-row { display: flex; justify-content: space-between; align-items: flex-end; margin-top: 40px; }
+    .words-box { flex: 1; margin-right: 40px; font-weight: bold; font-size: 14px; }
+    .signature { text-align: center; border-top: 1px solid #000; padding-top: 5px; width: 150px; font-weight: bold; }
+
+    .error-box { background: #fee2e2; color: #991b1b; padding: 20px; border-radius: 8px; text-align: center; margin: 40px; font-weight: bold; font-size: 18px; }
+
+    @media print {
+      body { background: none !important; margin: 0 !important; padding: 0 !important; display: block !important; }
+      .page-header, .action-bar, .page-footer { display: none !important; }
+      #renderArea { display: none !important; }
+      html, body { height: 100% !important; }
+      #viewPrintArea {
+        display: block !important;
+        width: 100% !important;
+        height: 100% !important;
+        margin: 0 !important;
+        padding: 0 !important;
+      }
+      #viewPrintArea img {
+        width: 100% !important;
+        max-height: 100% !important;
+        object-fit: contain !important;
+        display: block !important;
+      }
+      @page { size: auto; margin: 0mm !important; }
+      * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+    }
+
+    .page-header {
+      width: 100%;
+      background: linear-gradient(135deg, #0f172a 0%, #1e3a5f 100%);
+      padding: 18px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+      box-sizing: border-box;
+    }
+    .page-header img {
+      height: 44px; width: 44px; border-radius: 50%;
+      border: 2px solid rgba(255,255,255,0.3);
+      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    }
+    .page-header .hdr-text { display: flex; flex-direction: column; }
+    .page-header .hdr-title {
+      font-size: 16px; font-weight: 800; color: #ffffff;
+      font-family: Georgia, serif; letter-spacing: 0.5px;
+    }
+    .page-header .hdr-sub {
+      font-size: 11px; color: rgba(255,255,255,0.85);
+      font-weight: 600; text-transform: uppercase; letter-spacing: 1px; margin-top: 2px;
+    }
+
+    .action-bar {
+      display: flex;
+      justify-content: center;
+      gap: 12px;
+      padding: 20px;
+      width: 100%;
+      max-width: 840px;
+      box-sizing: border-box;
+    }
+    .action-btn {
+      flex: 1;
+      max-width: 200px;
+      padding: 14px 20px;
+      border: none;
+      border-radius: 12px;
+      font-weight: 700;
+      font-size: 0.95rem;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      transition: all 0.2s ease;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    .action-btn:active { transform: scale(0.97); }
+    .action-btn.print-btn {
+      background: linear-gradient(135deg, #2563eb, #1d4ed8);
+      color: #ffffff;
+    }
+    .action-btn.print-btn:hover { box-shadow: 0 4px 16px rgba(37,99,235,0.4); }
+    .action-btn.download-btn {
+      background: linear-gradient(135deg, #10b981, #059669);
+      color: #ffffff;
+    }
+    .action-btn.download-btn:hover { box-shadow: 0 4px 16px rgba(16,185,129,0.4); }
+
+    .page-footer {
+      text-align: center;
+      padding: 16px 20px 24px;
+      font-size: 12px;
+      color: #94a3b8;
+      font-weight: 500;
+    }
+    .page-footer a { color: var(--text-slate-500); text-decoration: none; }
+
+    @media (max-width: 500px) {
+      .page-header { padding: 14px 16px; gap: 10px; }
+      .page-header .hdr-title { font-size: 14px; }
+      .action-bar { gap: 10px; padding: 16px 16px; }
+      .action-btn { padding: 12px 14px; font-size: 0.88rem; border-radius: 10px; }
+    }
+  </style>
+  <script src="js/pg-firebase-bridge.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+</head>
+<body>
+
+  <!-- Church Branding Header -->
+  <div class="page-header">
+    <img src="logo.png" onerror="this.style.display='none'">
+    <div class="hdr-text">
+      <span class="hdr-title">IPC HOREB CHURCH, THADIYOOR</span>
+      <span class="hdr-sub">Transaction Document</span>
+    </div>
+  </div>
+
+  <!-- Document Render Area -->
+  <div id="renderArea"></div>
+
+  <!-- Action Buttons Below Receipt -->
+  <div class="action-bar" id="actionBar" style="display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; margin-top: 16px;">
+    <button class="action-btn download-btn" id="btnDownload" onclick="downloadImage()">⬇️ Download PNG</button>
+    <button class="action-btn" id="btnWhatsApp" style="background: #25d366; color: #ffffff; font-weight: 700; display: inline-flex; align-items: center; gap: 6px;" onclick="shareDocumentWhatsApp()">🟢 WhatsApp</button>
+  </div>
+
+
+
+  <div id="viewPrintArea" style="display:none;"></div>
+
+  <script>
+    function formatMoney(num) {
+      if (!num || Number(num) === 0 || isNaN(num)) return '-';
+      return Math.floor(num).toLocaleString('en-IN');
+    }
+    function formatPs(num) {
+      if (!num || Number(num) === 0 || isNaN(num)) return '-';
+      return num % 1 === 0 ? '00' : Math.round((num % 1) * 100).toString().padStart(2, '0');
+    }
+
+    async function generatePrintCanvas() {
+      const original = document.getElementById('printContainer');
+      if (!original) return null;
+
+      const wrapper = document.createElement('div');
+      wrapper.style.position = 'fixed';
+      wrapper.style.top = '-10000px';
+      wrapper.style.left = '-10000px';
+      wrapper.style.zIndex = '-9999';
+      wrapper.style.setProperty('zoom', '1', 'important');
+      wrapper.style.setProperty('transform', 'none', 'important');
+      wrapper.style.setProperty('width', '800px', 'important');
+      document.body.appendChild(wrapper);
+
+      const clone = original.cloneNode(true);
+      clone.id = 'printContainerClone';
+      clone.style.setProperty('zoom', '1', 'important');
+      clone.style.setProperty('transform', 'none', 'important');
+      clone.style.setProperty('-webkit-transform', 'none', 'important');
+      clone.style.setProperty('width', '800px', 'important');
+      clone.style.setProperty('max-width', '800px', 'important');
+      clone.style.setProperty('min-width', '800px', 'important');
+      clone.style.setProperty('height', 'auto', 'important');
+      clone.style.setProperty('max-height', 'none', 'important');
+      clone.style.setProperty('margin', '0', 'important');
+      wrapper.appendChild(clone);
+
+      try {
+        const bgColor = original.style.background || '#ffffff';
+        const canvas = await html2canvas(clone, {
+          scale: 2,
+          useCORS: true,
+          backgroundColor: bgColor,
+          scrollX: 0,
+          scrollY: 0,
+          width: 800,
+          windowWidth: 800,
+          windowHeight: 800,
+          onclone: (doc) => {
+            const style = doc.createElement('style');
+            style.innerHTML = `
+              html, body {
+                zoom: 1 !important;
+                transform: none !important;
+                -webkit-transform: none !important;
+                width: 800px !important;
+                margin: 0 !important;
+                padding: 0 !important;
+              }
+              /* FORCE the cloned container to be exactly 800px wide */
+              #printContainerClone {
+                width: 800px !important;
+                min-width: 800px !important;
+                max-width: 800px !important;
+                height: auto !important;
+                max-height: none !important;
+                margin: 0 !important;
+                zoom: 1 !important;
+                transform: none !important;
+                -webkit-transform: none !important;
+              }
+            `;
+            doc.head.appendChild(style);
+            
+            const el = doc.getElementById('printContainerClone');
+            if (el) {
+              el.style.setProperty('width', '800px', 'important');
+              el.style.setProperty('max-width', '800px', 'important');
+              el.style.setProperty('min-width', '800px', 'important');
+              el.style.setProperty('height', 'auto', 'important');
+              el.style.setProperty('max-height', 'none', 'important');
+              el.style.setProperty('margin', '0', 'important');
+              el.style.setProperty('zoom', '1', 'important');
+              el.style.setProperty('transform', 'none', 'important');
+              el.style.setProperty('-webkit-transform', 'none', 'important');
+            }
+          }
+        });
+        return canvas;
+      } catch (err) {
+        console.error("Error generating image:", err);
+        return null;
+      } finally {
+        if (wrapper.parentNode) {
+          wrapper.parentNode.removeChild(wrapper);
+        }
+      }
+    }
+
+    async function downloadImage() {
+      const canvas = await generatePrintCanvas();
+      if (!canvas) return;
+      const filename = `${document.title || 'Document'}.png`;
+      try {
+        const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+        const blobUrl = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = blobUrl;
+        link.download = filename;
+        link.style.display = 'none';
+        document.body.appendChild(link);
+        link.click();
+        setTimeout(() => { document.body.removeChild(link); URL.revokeObjectURL(blobUrl); }, 500);
+      } catch (e) {
+        // Fallback for strict browsers
+        const dataUrl = canvas.toDataURL('image/png');
+        const w = window.open();
+        if (w) { w.document.write('<img src="' + dataUrl + '" style="width:100%"/>'); w.document.title = filename; }
+      }
+    }
+
+    function renderError(msg = "Invalid or missing document link.") {
+      document.getElementById('renderArea').innerHTML = `<div class="error-box">${msg}</div>`;
+      const actionBar = document.getElementById('actionBar');
+      if (actionBar) actionBar.style.display = 'none';
+    }
+
+    function safeDecodePayload(dataStr) {
+      if (!dataStr) return null;
+      const attempts = [
+        dataStr,
+        decodeURIComponent(dataStr),
+        decodeURIComponent(dataStr).replace(/ /g, '+')
+      ];
+
+      for (let str of attempts) {
+        try {
+          const decodedAtob = atob(str);
+          const jsonStr = decodeURIComponent(escape(decodedAtob));
+          const parsed = JSON.parse(jsonStr);
+          if (parsed && typeof parsed === 'object') return parsed;
+        } catch (e) {
+          // continue
+        }
+      }
+      return null;
+    }
+
+    function init() {
+      const params = new URLSearchParams(window.location.search);
+      const dataStr = params.get('d');
+      let docId = params.get('id') || window.location.pathname.substring(1);
+      docId = decodeURIComponent(docId || '').trim();
+
+      if (docId && docId !== 'view.html' && docId.length >= 2) {
+        fetchFromFirestore(docId, dataStr);
+      } else if (dataStr) {
+        const data = safeDecodePayload(dataStr);
+        if (data) {
+          renderDocument(data);
+        } else {
+          renderError("Failed to parse document payload.");
+        }
+      } else {
+        renderError();
+      }
+    }
+
+    function copyDocumentLink() {
+      const link = window.location.href;
+      navigator.clipboard.writeText(link).then(() => {
+        alert("🔗 Document link copied to clipboard:\n" + link);
+      }).catch(err => {
+        prompt("Copy this link to share:", link);
+      });
+    }
+
+    function shareDocumentWhatsApp() {
+      const link = window.location.href;
+      const title = document.title || "IPC Horeb Church Document";
+      const text = `📄 *${title}*\nClick to view & download document:\n${link}`;
+      window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
+    }
+
+    async function fetchFromFirestore(docId, dataStr) {
+      document.getElementById('renderArea').innerHTML = `<div style="margin: 40px; font-size: 18px; font-weight: bold; text-align: center; color: #2563eb;">Loading document data...</div>`;
+      try {
+        if (!firebase.apps.length) {
+          firebase.initializeApp({
+            apiKey: "AIzaSyALzvrqSgwG1s9M_mFy6D9ZhGSkb4WrFss",
+            authDomain: "church-e0f29.firebaseapp.com",
+            databaseURL: "https://church-e0f29-default-rtdb.firebaseio.com",
+            projectId: "church-e0f29",
+            storageBucket: "church-e0f29.firebasestorage.app",
+            messagingSenderId: "539755932399",
+            appId: "1:539755932399:web:6c9c4bd5450661a939091a",
+            measurementId: "G-825YZK5GLW"
+          });
+        }
+        const db = firebase.firestore();
+        let payload = null;
+
+        // 1. Try reading shared_links doc from Firestore
+        try {
+          const doc = await db.collection('shared_links').doc(docId).get();
+          if (doc.exists) {
+            payload = doc.data().payload || null;
+          }
+        } catch (err) {
+          console.warn("Could not read shared_links doc directly:", err);
+        }
+
+        // 2. Try parsing dataStr URL parameter fallback with safeDecodePayload
+        if (!payload && dataStr) {
+          payload = safeDecodePayload(dataStr);
+        }
+
+        // 3. Fallback to constructing payload from docId live query
+        if (!payload) {
+          payload = await constructPayloadFromDocId(docId, db);
+        }
+
+        if (payload) {
+          // Clean up address bar to display clean URL
+          if (window.history && window.history.replaceState) {
+            window.history.replaceState({}, '', `${window.location.origin}/${docId}`);
+          }
+          // LIVE UPDATE: Fetch latest payments/transactions if it's a Member Statement (t === 'l')
+          if (payload.t === 'l' && payload.n) {
+            try {
+              const targetNameLower = (payload.n || '').toLowerCase().trim();
+              const [snap1, snap2] = await Promise.all([
+                db.collection('transactions').get(),
+                db.collection('bank_transactions').get()
+              ]);
+
+              let allTxs = [];
+              snap1.forEach(d => allTxs.push(d.data()));
+              snap2.forEach(d => allTxs.push(d.data()));
+
+              const mTxList = allTxs.filter(tx => {
+                if (!tx) return false;
+                let name = (tx.accountName && tx.accountName !== '-') ? tx.accountName : (tx.name && tx.name !== '-' ? tx.name : '');
+                return name && name.toLowerCase().trim() === targetNameLower;
+              });
+
+              if (mTxList.length > 0) {
+                mTxList.sort((a, b) => new Date(a.date) - new Date(b.date));
+                let totalContrib = 0;
+                let txsData = [];
+                mTxList.forEach(tx => {
+                  const isPayment = (tx.payment && tx.payment > 0);
+                  const amt = Number(tx.receipt || tx.payment || 0);
+                  if (tx.receipt) totalContrib += Number(tx.receipt);
+                  let cat = tx.subtype || tx.type || 'Subscription';
+                  if ((tx.type || '').toLowerCase() === 'charity') {
+                    cat = isPayment ? 'Charity Paid' : 'Charity Received';
+                  }
+                  const dStr = tx.date ? new Date(tx.date).toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '-';
+                  txsData.push([
+                    dStr,
+                    tx.vrNo || '-',
+                    tx.description || '-',
+                    cat,
+                    amt
+                  ]);
+                });
+                payload.tot = totalContrib;
+                payload.txs = txsData;
+                payload.date = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' });
+              }
+            } catch (err) {
+              console.warn("Could not fetch live transaction updates for statement:", err);
+            }
+          }
+
+          // LIVE UPDATE: Fetch latest status and full details if Receipt (t === 'r') or Payment Voucher (t === 'p')
+          if ((payload.t === 'r' || payload.t === 'p') && payload.v) {
+            try {
+              const vrNoVal = String(payload.v).trim();
+              const isRcptDoc = (payload.t === 'r');
+              const [snap1, snap2] = await Promise.all([
+                db.collection('transactions').get(),
+                db.collection('bank_transactions').get()
+              ]);
+              let candidateDocs = [];
+              snap1.forEach(d => candidateDocs.push(d.data()));
+              snap2.forEach(d => candidateDocs.push(d.data()));
+
+              const targetClean = vrNoVal.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+
+              const txMatch = candidateDocs.find(tx => {
+                if (!tx || !tx.vrNo) return false;
+                const hasReceipt = (tx.receipt && Number(tx.receipt) > 0);
+                const hasPayment = (tx.payment && Number(tx.payment) > 0);
+                const typeMatches = isRcptDoc ? (hasReceipt || !hasPayment) : (hasPayment || !hasReceipt);
+                if (!typeMatches) return false;
+
+                const rawV = String(tx.vrNo).trim().toLowerCase();
+                const cleanV = rawV.replace(/[^a-zA-Z0-9]/g, '');
+                return rawV === vrNoVal.toLowerCase() || cleanV === targetClean;
+              });
+
+              if (txMatch) {
+                const amt = Number(txMatch.receipt || txMatch.payment || txMatch.amount || 0);
+                const dateStr = txMatch.date ? new Date(txMatch.date).toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' }) : payload.d;
+                const descLower = (txMatch.description || '').toLowerCase();
+                const typeLower = (txMatch.type || '').toLowerCase();
+                const isCancelled = descLower.includes('cancelled') || typeLower.includes('cancelled') || (txMatch.accountName || '').toLowerCase().includes('cancelled');
+
+                payload.tot = amt;
+                payload.d = dateStr;
+                payload.n = txMatch.accountName || txMatch.name || txMatch.paidTo || payload.n;
+                payload.addr = txMatch.address !== undefined ? txMatch.address : payload.addr;
+                payload.cancel = isCancelled;
+
+                if (isRcptDoc) {
+                  let don = 0, sub = 0, off = 0, oth = 0, othDesc = 'Other Items';
+                  const subStr = (txMatch.subtype || '').toLowerCase();
+                  if (typeLower.includes('subscription') || subStr.includes('subscription')) sub = amt;
+                  else if (typeLower.includes('offering') || subStr.includes('offertory')) off = amt;
+                  else if (typeLower.includes('donation') || subStr.includes('donation')) don = amt;
+                  else {
+                    oth = amt;
+                    othDesc = txMatch.subtype || txMatch.type || 'Other Items';
+                  }
+                  payload.don = don;
+                  payload.sub = sub;
+                  payload.off = off;
+                  payload.oth = oth;
+                  payload.othDesc = othDesc;
+                  payload.subMonth = txMatch.subMonth || payload.subMonth || '';
+                } else {
+                  payload.h = txMatch.type || txMatch.subtype || payload.h || 'Expense';
+                  payload.desc = txMatch.description || payload.desc || '';
+                }
+              }
+            } catch (err) {
+              console.warn("Could not fetch live transaction updates for receipt/voucher:", err);
+            }
+          }
+
+          document.getElementById('renderArea').innerHTML = '';
+          renderDocument(payload);
+        } else {
+          renderError("Document link not found in database.");
+        }
+      } catch (e) {
+        console.error("Firestore error", e);
+        renderError(`Error fetching document: ${e.message || "Unknown error"}`);
+      }
+    }
+
+    async function constructPayloadFromDocId(docId, db) {
+      if (!docId || docId.length < 2) return null;
+      const parts = docId.split('-');
+      const typePrefix = parts[0].toUpperCase();
+
+      try {
+        if (typePrefix === 'R' || typePrefix === 'P') {
+          const isRcpt = (typePrefix === 'R');
+          const vrPart = parts.length > 1 ? parts[1].trim() : '';
+          const fullVrPart = parts.slice(1).join('-').trim();
+          if (!vrPart && !fullVrPart) return null;
+
+          const [snap1, snap2] = await Promise.all([
+            db.collection('transactions').get(),
+            db.collection('bank_transactions').get()
+          ]);
+
+          let allTxs = [];
+          snap1.forEach(d => allTxs.push(d.data()));
+          snap2.forEach(d => allTxs.push(d.data()));
+
+          // Filter by transaction type strictly (Receipt vs Payment Voucher)
+          const filteredTxs = allTxs.filter(tx => {
+            if (!tx || !tx.vrNo) return false;
+            const hasReceipt = (tx.receipt && Number(tx.receipt) > 0);
+            const hasPayment = (tx.payment && Number(tx.payment) > 0);
+            if (isRcpt) {
+              return hasReceipt || (!hasPayment && (tx.type || '').toLowerCase() !== 'expense');
+            } else {
+              return hasPayment || (!hasReceipt && (tx.type || '').toLowerCase() === 'expense');
+            }
+          });
+
+          // Match by vrNo using vrPart (e.g., "79" from "P-79-Pastor") then fallback to fullVrPart
+          let txMatch = null;
+          const candidates = [vrPart, fullVrPart].filter(Boolean);
+
+          for (let targetVr of candidates) {
+            const targetClean = targetVr.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+            txMatch = filteredTxs.find(tx => {
+              const rawV = String(tx.vrNo).trim().toLowerCase();
+              return rawV === targetVr.toLowerCase() || rawV === (isRcpt ? 'r-' : 'p-') + targetVr.toLowerCase();
+            });
+
+            if (!txMatch) {
+              txMatch = filteredTxs.find(tx => {
+                const cleanV = String(tx.vrNo).replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+                return cleanV === targetClean || cleanV === (isRcpt ? 'r' : 'p') + targetClean || cleanV === (isRcpt ? 'rec' : 'pay') + targetClean;
+              });
+            }
+
+            if (txMatch) break;
+          }
+
+          if (!txMatch) return null;
+
+          const amt = Number(txMatch.receipt || txMatch.payment || txMatch.amount || 0);
+          const dateStr = txMatch.date ? new Date(txMatch.date).toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '';
+          const descLower = (txMatch.description || '').toLowerCase();
+          const typeLower = (txMatch.type || '').toLowerCase();
+          const isCancelled = descLower.includes('cancelled') || typeLower.includes('cancelled');
+
+          if (isRcpt) {
+            let don = 0, sub = 0, off = 0, oth = 0, othDesc = 'Other Items';
+            const subStr = (txMatch.subtype || '').toLowerCase();
+            if (typeLower.includes('subscription') || subStr.includes('subscription')) sub = amt;
+            else if (typeLower.includes('offering') || subStr.includes('offertory')) off = amt;
+            else if (typeLower.includes('donation') || subStr.includes('donation')) don = amt;
+            else {
+              oth = amt;
+              othDesc = txMatch.subtype || txMatch.type || 'Other Items';
+            }
+
+            return {
+              t: 'r',
+              v: txMatch.vrNo || targetVr,
+              d: dateStr,
+              n: txMatch.accountName || txMatch.name || 'Member',
+              addr: txMatch.address || '',
+              subMonth: txMatch.subMonth || '',
+              don: don, sub: sub, off: off, oth: oth, othDesc: othDesc,
+              tot: amt,
+              words: '',
+              cancel: isCancelled
+            };
+          } else {
+            return {
+              t: 'p',
+              v: txMatch.vrNo || targetVr,
+              d: dateStr,
+              n: txMatch.accountName || txMatch.name || txMatch.paidTo || 'Payee',
+              addr: txMatch.address || '',
+              h: txMatch.type || txMatch.subtype || 'Expense',
+              desc: txMatch.description || '',
+              tot: amt,
+              words: ''
+            };
+          }
+        } else if (typePrefix === 'L') {
+          const codeMatch = docId.match(/H\d+/i);
+          const targetCode = codeMatch ? codeMatch[0].toUpperCase() : '';
+
+          const [snap1, snap2, snapMembers] = await Promise.all([
+            db.collection('transactions').get(),
+            db.collection('bank_transactions').get(),
+            db.collection('members').get()
+          ]);
+
+          let allTxs = [];
+          snap1.forEach(d => allTxs.push(d.data()));
+          snap2.forEach(d => allTxs.push(d.data()));
+
+          let membersList = [];
+          snapMembers.forEach(d => membersList.push(d.data()));
+
+          // Sort members identically to getMemberCode in app.js
+          const compareNamesIgnoringPrefix = (a, b) => {
+            const cleanA = (a || '').replace(/^(Bro\.|Br\.|Sis\.|Sr\.|Pr\.|Evg\.)\s+/i, '').trim().toLowerCase();
+            const cleanB = (b || '').replace(/^(Bro\.|Br\.|Sis\.|Sr\.|Pr\.|Evg\.)\s+/i, '').trim().toLowerCase();
+            return cleanA.localeCompare(cleanB) || (a || '').localeCompare(b || '');
+          };
+          const sortedMembers = [...membersList].filter(m => m && m.name).sort((a, b) => compareNamesIgnoringPrefix(a.name, b.name));
+
+          let mMatch = null;
+          if (targetCode) {
+            const idx = parseInt(targetCode.substring(1), 10) - 1;
+            if (idx >= 0 && idx < sortedMembers.length) {
+              mMatch = sortedMembers[idx];
+            }
+          }
+
+          if (!mMatch) {
+            const searchFrag = docId.replace(/^L-?/i, '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+            mMatch = membersList.find(m => {
+              if (!m || !m.name) return false;
+              const cleanN = m.name.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+              return cleanN.includes(searchFrag) || searchFrag.includes(cleanN);
+            });
+          }
+
+          let mName = mMatch ? mMatch.name : (parts[1] || 'Member');
+          let mAddr = mMatch ? mMatch.address : '';
+
+          const mNameLower = mName.toLowerCase().trim();
+          const rawTxList = allTxs.filter(tx => {
+            if (!tx) return false;
+            let name = (tx.accountName && tx.accountName !== '-') ? tx.accountName : (tx.name && tx.name !== '-' ? tx.name : '');
+            return name && name.toLowerCase().trim() === mNameLower;
+          });
+
+          rawTxList.sort((a, b) => new Date(a.date) - new Date(b.date));
+
+          // Group split entries into single receipts
+          const groupedMap = {};
+          const mTxList = [];
+
+          rawTxList.forEach(tx => {
+            let rawVr = tx.vrNo || '';
+            let cleanVr = rawVr.trim().toLowerCase();
+            let isBlankVr = !cleanVr || cleanVr === '-' || cleanVr === '--' || cleanVr === 'ob';
+
+            let groupingKey;
+            if (tx.splitGroupId) {
+              groupingKey = 'split_' + tx.splitGroupId;
+            } else if (tx.transactionId && String(tx.transactionId).trim() !== '') {
+              groupingKey = 'txid_' + tx.transactionId;
+            } else if (!isBlankVr) {
+              const mode = (tx.payment && tx.payment > 0) ? 'Payment' : 'Receipt';
+              groupingKey = cleanVr + '_' + (tx.date || '') + '_' + mode;
+            } else if (tx.isSplitEntry) {
+              groupingKey = 'split_legacy_' + (tx.date || '') + '_' + (tx.accountName || '') + '_' + (tx.mode || '') + '_' + (tx.splitTotalAmount || '');
+            } else {
+              groupingKey = 'unique_' + (tx.id || Math.random());
+            }
+
+            const rcpt = Number(tx.receipt || 0);
+            const pmt = Number(tx.payment || tx.payments || 0);
+            const isPmt = (pmt > 0);
+            const amt = isPmt ? pmt : rcpt;
+
+            let dStr = (tx.description || tx.subtype || tx.type || '').trim();
+            let typeStr = (tx.subtype && tx.subtype !== '-' && tx.subtype !== 'General') ? tx.subtype : (tx.type || '').trim();
+
+            if (!groupedMap[groupingKey]) {
+              const newTx = Object.assign({}, tx);
+              newTx.receipt = rcpt;
+              newTx.payment = pmt;
+              newTx.amount = amt;
+              newTx._splitItems = [tx];
+              newTx._descParts = [];
+              if (dStr) {
+                newTx._descParts.push({ text: dStr, amount: amt, type: typeStr });
+              }
+              newTx._types = typeStr ? [typeStr] : [];
+              groupedMap[groupingKey] = newTx;
+              mTxList.push(newTx);
+            } else {
+              const target = groupedMap[groupingKey];
+              target.receipt += rcpt;
+              target.payment += pmt;
+              target.amount = (target.receipt || target.payment);
+              target._splitItems.push(tx);
+
+              if (dStr) {
+                target._descParts.push({ text: dStr, amount: amt, type: typeStr });
+              }
+              if (typeStr && !target._types.includes(typeStr)) {
+                target._types.push(typeStr);
+              }
+            }
+          });
+
+          let totalContrib = 0;
+          let txsData = [];
+
+          mTxList.forEach(tx => {
+            const isPayment = (tx.payment && tx.payment > 0);
+            const amt = Number(tx.receipt || tx.payment || 0);
+            if (tx.receipt) totalContrib += Number(tx.receipt);
+
+            let descText = tx.description || '-';
+            let cat = tx.subtype || tx.type || 'Subscription';
+
+            if (tx._splitItems && tx._splitItems.length > 1) {
+              const descStrings = tx._descParts.map(p => {
+                return `${p.text} (₹${p.amount.toLocaleString('en-IN')})`;
+              });
+              descText = descStrings.join(' + ');
+
+              if (tx._types.length === 1) {
+                cat = tx._types[0];
+              } else if (tx._types.length > 1) {
+                cat = 'Split (' + tx._types.join(', ') + ')';
+              } else {
+                cat = 'Split Receipt';
+              }
+            } else {
+              if ((tx.type || '').toLowerCase() === 'charity') {
+                cat = isPayment ? 'Charity Paid' : 'Charity Received';
+              }
+            }
+
+            const dStr = tx.date ? new Date(tx.date).toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '-';
+            txsData.push([
+              dStr,
+              tx.vrNo || '-',
+              descText,
+              cat,
+              amt
+            ]);
+          });
+
+          return {
+            t: 'l',
+            n: mName,
+            addr: mAddr || 'Not specified',
+            tot: totalContrib,
+            date: new Date().toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' }),
+            txs: txsData
+          };
+        }
+      } catch (err) {
+        console.error("Error constructing payload from docId:", err);
+      }
+      return null;
+    }
+
+    function renderDocument(data) {
+      const area = document.getElementById('renderArea');
+      let html = '';
+
+      if (data.t === 'r') { html = renderReceipt(data); document.title = `Receipt_${data.v}`; }
+      else if (data.t === 'p') { html = renderPayment(data); document.title = `Payment_Voucher_${data.v}`; }
+      else if (data.t === 'l') { html = renderLedger(data); document.title = `Ledger_${data.n.replace(/\s+/g, '_')}`; }
+
+      area.innerHTML = html;
+    }
+
+    function renderReceipt(data) {
+      return `
+        <div id="printContainer" style="background: #cce3d0; border: 1px solid #cce3d0; padding: 10px 24px; color: #000; font-family: 'Cambria', 'Georgia', serif; box-shadow: 0 4px 15px rgba(0,0,0,0.08); position: relative; width: 800px; min-width: 800px; max-width: 800px; min-height: 566px; display: flex; flex-direction: column; box-sizing: border-box; margin: 0 auto;">
+
+          <!-- Watermark -->
+          <img src="Seal.png" class="watermark-img"
+            style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 40%; max-width: 300px; opacity: 0.08; pointer-events: none; z-index: 0;">
+
+          <!-- Cancelled Stamp -->
+          ${data.cancel ? `<div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%) rotate(-35deg); font-size: 5.5rem; font-weight: 900; color: rgba(239, 68, 68, 0.7); border: 8px solid rgba(239, 68, 68, 0.7); padding: 15px 40px; letter-spacing: 10px; text-transform: uppercase; z-index: 50; pointer-events: none; white-space: nowrap;">CANCELLED</div>` : ''}
+
+          <!-- Header -->
+          <div style="text-align: center; margin-bottom: 2px; position: relative; z-index: 1;">
+            <h2 style="font-size: 1.35rem; font-weight: bold; letter-spacing: 0.5px; margin: 0; color: #000; font-family: 'Arial', sans-serif;">
+              IPC HOREB CHURCH, THADIYOOR
+            </h2>
+            <div style="font-size: 0.95rem; font-weight: normal; margin-top: 2px; color: #000;">
+              THADIYOOR P.O., PIN: 689 545
+            </div>
+            <div style="font-size: 0.95rem; font-weight: normal; margin-top: 2px; color: #000;">
+              Tel: 7902914549
+            </div>
+          </div>
+
+          <!-- RECEIPT BADGE -->
+          <div style="text-align: center; margin: 4px 0 10px 0; position: relative; z-index: 1;">
+            <span
+              style="background: #000; color: #ffffff; font-weight: bold; font-size: 0.95rem; padding: 3px 14px; border-radius: 4px; display: inline-block; letter-spacing: 1px;">
+              RECEIPT
+            </span>
+          </div>
+
+          <!-- No & Date Row -->
+          <div
+            style="display: flex; justify-content: space-between; align-items: baseline; font-size: 1.05rem; margin-bottom: 6px; position: relative; z-index: 1;">
+            <div>
+              <span style="font-weight: normal;">No. </span>
+              <span style="color: #d32f2f; font-weight: bold; font-size: 1.35rem; font-family: monospace; letter-spacing: 1px;">${data.v}</span>
+            </div>
+            <div>
+              <span style="font-weight: normal;">Date: </span>
+              <span style="font-weight: bold; font-size: 1.15rem;">${data.d}</span>
+            </div>
+          </div>
+
+          <!-- Received with thanks from -->
+          <div
+            style="font-size: 1.05rem; margin-bottom: 6px; display: flex; align-items: baseline; position: relative; z-index: 1;">
+            <span style="white-space: nowrap; font-weight: normal;">Received with thanks from: &nbsp;</span>
+            <span style="border-bottom: 1px solid #000; flex: 1; font-weight: bold; font-size: 1.25rem; padding: 0 5px;">${data.n}</span>
+          </div>
+
+          <!-- Address -->
+          <div
+            style="font-size: 1.05rem; margin-bottom: 6px; display: flex; align-items: baseline; position: relative; z-index: 1;">
+            <span style="white-space: nowrap; font-weight: normal;">Address: &nbsp;</span>
+            <span style="border-bottom: 1px solid #000; flex: 1; font-weight: bold; font-size: 1.15rem; padding: 0 5px;">${data.addr || '-'}</span>
+          </div>
+
+          <!-- Being Table -->
+          <div style="font-weight: normal; font-size: 1.05rem; margin-bottom: 4px; position: relative; z-index: 1;">
+            Being:</div>
+          <table
+            style="width: 100%; border-collapse: collapse; border: 1px solid #000; margin-bottom: 8px; font-size: 1rem; background: transparent; position: relative; z-index: 1;">
+            <thead>
+              <tr style="border-bottom: 1px solid #000;">
+                <th
+                  style="text-align: center; padding: 6px; border-right: 1px solid #000; font-weight: normal; width: 60px;">
+                  Sr. No.</th>
+                <th style="text-align: center; padding: 6px; border-right: 1px solid #000; font-weight: normal;">
+                  Particulars / Category</th>
+                <th
+                  style="text-align: center; padding: 6px; border-right: 1px solid #000; font-weight: normal; width: 110px;">
+                  Amount </th>
+                <th style="text-align: center; padding: 6px; font-weight: normal; width: 50px;">Ps.</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td style="padding: 6px; border-right: 1px solid #000; text-align: center;">1.</td>
+                <td style="padding: 6px; border-right: 1px solid #000;">
+                  <div style="display:flex; align-items:flex-end;">
+                    <div style="white-space:nowrap;">Donation </div>
+                    <div style="flex:1; border-bottom: 2px dotted #000; margin: 0 4px 6px 4px;"></div>
+                  </div>
+                </td>
+                <td style="padding: 6px; border-right: 1px solid #000; text-align: right; font-weight: bold; font-size: 1.1rem;">
+                  ${formatMoney(data.don)}</td>
+                <td style="padding: 6px; text-align: center; font-weight: bold; font-size: 1.1rem;">${formatPs(data.don)}
+                </td>
+              </tr>
+              <tr>
+                <td style="padding: 6px; border-right: 1px solid #000; text-align: center;">2.</td>
+                <td style="padding: 6px; border-right: 1px solid #000;">
+                  <div style="display:flex; align-items:flex-end;">
+                    <div style="white-space:nowrap;">Monthly Subscription ${data.subMonth ? `<span style="font-size: 0.9em; font-weight: bold; margin-left: 4px;">(${data.subMonth})</span>` : ''}</div>
+                    <div style="flex:1; border-bottom: 2px dotted #000; margin: 0 4px 6px 4px;"></div>
+                  </div>
+                </td>
+                <td style="padding: 6px; border-right: 1px solid #000; text-align: right; font-weight: bold; font-size: 1.1rem;">
+                  ${formatMoney(data.sub)}</td>
+                <td style="padding: 6px; text-align: center; font-weight: bold; font-size: 1.1rem;">${formatPs(data.sub)}</td>
+              </tr>
+              <tr>
+                <td style="padding: 6px; border-right: 1px solid #000; text-align: center;">3.</td>
+                <td style="padding: 6px; border-right: 1px solid #000;">
+                  <div style="display:flex; align-items:flex-end;">
+                    <div style="white-space:nowrap;">Offertory </div>
+                    <div style="flex:1; border-bottom: 2px dotted #000; margin: 0 4px 6px 4px;"></div>
+                  </div>
+                </td>
+                <td style="padding: 6px; border-right: 1px solid #000; text-align: right; font-weight: bold; font-size: 1.1rem;">
+                  ${formatMoney(data.off)}</td>
+                <td style="padding: 6px; text-align: center; font-weight: bold; font-size: 1.1rem;">${formatPs(data.off)}</td>
+              </tr>
+              <tr style="border-bottom: 1px solid #000;">
+                <td style="padding: 6px; border-right: 1px solid #000; text-align: center;">4.</td>
+                <td style="padding: 6px; border-right: 1px solid #000;">
+                  <div style="display:flex; align-items:flex-end;">
+                    <div style="white-space:nowrap;">Other Items</div>
+                    <div style="flex:1; border-bottom: 2px dotted #000; margin: 0 4px 4px 4px; text-align: center;">
+                      <span style="font-size: 0.95rem; font-weight: 700; color: var(--text-slate-900);">${data.othDesc || ''}</span>
+                    </div>
+                  </div>
+                </td>
+                <td style="padding: 6px; border-right: 1px solid #000; text-align: right; font-weight: bold; font-size: 1.1rem;">
+                  ${formatMoney(data.oth)}</td>
+                <td style="padding: 6px; text-align: center; font-weight: bold; font-size: 1.1rem;">${formatPs(data.oth)}</td>
+              </tr>
+              <tr>
+                <td colspan="2"
+                  style="border-right: 1px solid #000; padding: 6px; text-align: right; font-weight: bold; font-size: 1.15rem;">
+                  TOTAL</td>
+                <td colspan="2"
+                  style="padding: 6px 8px 6px 4px; text-align: right; white-space: nowrap; font-weight: bold; font-size: 1.15rem;">
+                  ${formatMoney(data.tot)} /-</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <!-- Rupees in words -->
+          <div
+            style="font-size: 1.05rem; display: flex; align-items: baseline; position: relative; z-index: 1; margin-top: 8px;">
+            <span style="font-weight: normal; white-space: nowrap;">Rupees (in words): &nbsp;</span>
+            <span
+              style="border-bottom: 1px solid #000; flex: 1; padding: 0 4px; text-align: left; font-weight: bold; font-size: 1.15rem;">${data.words}</span>
+          </div>
+
+          <!-- Treasurer Footer -->
+          <div
+            style="display: flex; justify-content: flex-end; align-items: flex-end; margin-top: auto; position: relative; z-index: 1;">
+            <div style="text-align: center; width: 150px; position: relative;">
+              <div style="position: relative; height: 40px;">
+                <img src="Treasurersign.png"
+                  style="position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); height: 50px; max-width: 150px; object-fit: contain; mix-blend-mode: multiply; filter: contrast(180%) brightness(1.05); z-index: 1;"
+                  onerror="this.style.display='none'">
+              </div>
+              <div style="height: 1px; border-bottom: 1px solid #000; position: relative; z-index: 2;"></div>
+              <div style="font-weight: normal; font-size: 1rem; margin-top: 4px; color: #000;">Treasurer</div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderPayment(data) {
+      return `
+        <div id="printContainer"
+          style="background: #fffae6; border: 1px solid #fffae6; padding: 10px 24px; color: #000; font-family: 'Cambria', 'Georgia', 'Noto Sans Malayalam', serif; box-shadow: 0 4px 15px rgba(0,0,0,0.08); position: relative; width: 800px; min-width: 800px; max-width: 800px; height: 566px; min-height: 566px; max-height: 566px; display: flex; flex-direction: column; box-sizing: border-box; margin: 0 auto;">
+
+          <!-- Watermark -->
+          <img src="Seal.png" class="watermark-img"
+            style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 40%; max-width: 300px; opacity: 0.08; pointer-events: none; z-index: 0;">
+
+          <!-- Cancelled Stamp -->
+          ${data.cancel ? `<div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%) rotate(-35deg); font-size: 5.5rem; font-weight: 900; color: rgba(239, 68, 68, 0.7); border: 8px solid rgba(239, 68, 68, 0.7); padding: 15px 40px; letter-spacing: 10px; text-transform: uppercase; z-index: 50; pointer-events: none; white-space: nowrap;">CANCELLED</div>` : ''}
+
+          <!-- Header -->
+          <div style="text-align: center; margin-bottom: 2px; position: relative; z-index: 1;">
+            <h2 style="font-size: 1.35rem; font-weight: bold; letter-spacing: 0.5px; margin: 0; color: #000; font-family: 'Arial', sans-serif;">
+              IPC HOREB CHURCH, THADIYOOR
+            </h2>
+            <div style="font-size: 0.95rem; font-weight: normal; margin-top: 2px; color: #000;">
+              THADIYOOR P.O., PIN: 689 545
+            </div>
+            <div style="font-size: 0.95rem; font-weight: normal; margin-top: 2px; color: #000;">
+              Tel: 7902914549
+            </div>
+          </div>
+
+          <!-- PAYMENT VOUCHER BADGE -->
+          <div style="text-align: center; margin: 4px 0 10px 0; position: relative; z-index: 1;">
+            <span
+              style="background: #000; color: #ffffff; font-weight: bold; font-size: 0.95rem; padding: 3px 14px; border-radius: 4px; display: inline-block; letter-spacing: 1px;">
+              PAYMENT VOUCHER
+            </span>
+          </div>
+
+          <!-- Number & Date Row -->
+          <div
+            style="display: flex; justify-content: space-between; align-items: baseline; font-size: 1.05rem; margin-bottom: 8px; position: relative; z-index: 1;">
+            <div>
+              <span style="font-weight: normal;">നമ്പർ: </span>
+              <span style="color: #d32f2f; font-weight: bold; font-family: monospace; font-size: 1.35rem; letter-spacing: 1px;">${data.v}</span>
+            </div>
+            <div>
+              <span style="font-weight: normal;">തിയതി: </span>
+              <span style="font-weight: bold; font-size: 1.15rem;">${data.d}</span>
+            </div>
+          </div>
+
+          <!-- Paid To & Address -->
+          <div
+            style="font-size: 1.05rem; margin-bottom: 6px; display: flex; align-items: baseline; position: relative; z-index: 1;">
+            <span style="white-space: nowrap; font-weight: normal;">Paid to: &nbsp;</span>
+            <span style="border-bottom: 1px solid #000; flex: 1; font-weight: bold; font-size: 1.15rem; padding: 0 5px;">${data.n || '-'}</span>
+          </div>
+          <div
+            style="font-size: 1.05rem; margin-bottom: 10px; display: flex; align-items: baseline; position: relative; z-index: 1;">
+            <span style="white-space: nowrap; font-weight: normal;">Address: &nbsp;</span>
+            <span style="border-bottom: 1px solid #000; flex: 1; font-weight: bold; font-size: 1.15rem; padding: 0 5px;">${data.addr || '-'}</span>
+          </div>
+
+          <!-- Particulars Table -->
+          <table
+            style="width: 100%; border-collapse: collapse; border: 1px solid #000; margin-bottom: 12px; font-size: 1rem; background: transparent; position: relative; z-index: 1;">
+            <thead>
+              <tr style="border-bottom: 1px solid #000;">
+                <th
+                  style="text-align: center; padding: 6px; border-right: 1px solid #000; font-weight: normal; width: 60px;">
+                  ക്രമ നം.</th>
+                <th style="text-align: center; padding: 6px; border-right: 1px solid #000; font-weight: normal;">Head of
+                  Account / ഇനവിവരം</th>
+                <th
+                  style="text-align: center; padding: 6px; border-right: 1px solid #000; font-weight: normal; width: 110px;">
+                  രൂ.</th>
+                <th style="text-align: center; padding: 6px; font-weight: normal; width: 50px;">പ.</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr style="height: 100px; vertical-align: top; border-bottom: 1px solid #000;">
+                <td style="text-align: center; padding: 6px; border-right: 1px solid #000;">1</td>
+                <td style="padding: 6px; border-right: 1px solid #000;">
+                  <div style="font-size: 1.05rem; color: #000; margin-bottom: 3px;">${data.h}</div>
+                  <div style="font-size: 1.05rem; font-weight: bold; color: #111; line-height: 1.35;">${data.desc}</div>
+                </td>
+                <td style="padding: 6px; border-right: 1px solid #000; text-align: right; color: #000;">${formatMoney(data.tot)}
+                </td>
+                <td style="padding: 6px; text-align: center; color: #000;">${formatPs(data.tot)}</td>
+              </tr>
+              <tr>
+                <td colspan="2"
+                  style="border-right: 1px solid #000; padding: 6px; background: transparent; text-align: right; font-weight: bold; font-size: 1.25rem;">
+                  ആകെ
+                </td>
+                <td style="padding: 6px; border-right: 1px solid #000; text-align: right; font-weight: bold; font-size: 1.25rem; color: #000;">
+                  ₹${formatMoney(data.tot)}</td>
+                <td style="padding: 6px; text-align: center; font-weight: bold; font-size: 1.25rem; color: #000;">${formatPs(data.tot)}</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <!-- Amount in Words & Certification -->
+          <div
+            style="display: flex; align-items: flex-end; font-size: 1.05rem; margin-bottom: 10px; white-space: nowrap; z-index: 1;">
+            <div>Cash / Cheque (തുക അക്ഷരത്തിൽ): </div>
+            <div
+              style="flex: 1; border-bottom: 1px solid #000; padding: 0 4px; margin-left: 6px; text-align: left; color: #000; font-weight: bold; font-size: 1.15rem;">
+              ${data.words}</div>
+          </div>
+          <div
+            style="display: flex; justify-content: flex-end; align-items: flex-end; font-size: 1rem; color: #000; margin-bottom: 6px; position: relative; z-index: 1;">
+            <div style="width: 250px; border-bottom: 1px solid #000; margin-right: 8px;"></div>
+            <div>കൈപ്പറ്റിയതായി സമ്മതിക്കുന്നു</div>
+          </div>
+
+          <!-- Dedicated Signature Boxes Row -->
+          <div
+            style="display: flex; justify-content: space-between; align-items: flex-end; margin-top: auto; position: relative; z-index: 1;">
+            <div style="text-align: center; width: 140px;">
+              <div style="height: 36px; border-bottom: 1px solid #000; margin-bottom: 4px;"></div>
+              <div style="font-size: 1rem; color: #000;">പേരും ഒപ്പും</div>
+            </div>
+            <div style="text-align: center; width: 140px;">
+              <div style="height: 36px;"></div>
+              <div style="height: 1px; border-bottom: 1px solid #000;"></div>
+              <div style="font-size: 1rem; color: #000; margin-top: 4px;">President</div>
+            </div>
+            <div style="text-align: center; width: 140px;">
+              <div style="height: 36px;"></div>
+              <div style="height: 1px; border-bottom: 1px solid #000;"></div>
+              <div style="font-size: 1rem; color: #000; margin-top: 4px;">Secretary</div>
+            </div>
+            <div style="text-align: center; width: 140px; position: relative;">
+              <div style="position: relative; height: 36px;">
+                <img src="Treasurersign.png"
+                  style="position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); height: 46px; max-width: 140px; object-fit: contain; mix-blend-mode: multiply; filter: contrast(180%) brightness(1.05); z-index: 1;"
+                  onerror="this.style.display='none'">
+              </div>
+              <div style="height: 1px; border-bottom: 1px solid #000; position: relative; z-index: 2;"></div>
+              <div style="font-size: 1rem; color: #000; margin-top: 4px;">Treasurer</div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderLedger(data) {
+      let rows = data.txs.map(tx => `<tr style="background: var(--bg-white); border-bottom: 1.5px solid #000000;"><td style="padding: 6px 8px; border-right: 1px solid #000;">${tx[0]}</td><td style="padding: 6px 8px; border-right: 1px solid #000; text-align:center; font-family:monospace; font-weight:bold;">${tx[1]}</td><td style="padding: 6px 8px; border-right: 1px solid #000;">${tx[2]}</td><td style="padding: 6px 8px; border-right: 1px solid #000;">${tx[3]}</td><td style="padding: 6px 8px; text-align:right; font-weight: 800;">${formatMoney(tx[4])}</td></tr>`).join('');
+      return `
+        <div id="printContainer"
+          style="background: var(--bg-white); border: 2px solid #000000; border-radius: 8px; padding: 24px; color: #000000; font-family: 'Segoe UI', Arial, sans-serif; box-shadow: 0 4px 15px rgba(0,0,0,0.08); position: relative; width: 780px; min-width: 780px; max-width: 780px; box-sizing: border-box; margin: 0 auto;">
+
+          <!-- BACKGROUND WATERMARK -->
+          <img src="Seal.png" class="watermark-img"
+            style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 45%; max-width: 350px; opacity: 0.05; pointer-events: none; z-index: 0;">
+
+          <!-- Header -->
+          <div
+            style="display: flex; align-items: center; justify-content: center; gap: 14px; border-bottom: 2px solid #000; padding-bottom: 12px; margin-bottom: 16px;">
+            <img src="logo.png" alt="IPC Horeb Church Logo"
+              style="height: 52px; width: 52px; object-fit: contain; border-radius: 50%; background: var(--bg-white); padding: 2px; box-shadow: 0 2px 6px rgba(0,0,0,0.12); flex-shrink: 0;">
+            <div style="text-align: center;">
+              <h2
+                style="font-size: 1.3rem; font-weight: 900; letter-spacing: 0.5px; text-transform: uppercase; margin: 0; color: #000000; font-family: Georgia, serif;">
+                IPC HOREB CHURCH, THADIYOOR</h2>
+              <div style="font-size: 0.85rem; font-weight: 700; margin-top: 3px; color: var(--text-slate-700);">THADIYOOR P.O., PIN :
+                689 545 &nbsp;&nbsp;|&nbsp;&nbsp; Tel: 7902914549</div>
+              <div style="margin-top: 8px;">
+                <span
+                  style="background: #0f172a; color: #ffffff; font-weight: 800; font-size: 0.9rem; padding: 3px 18px; border-radius: 4px; letter-spacing: 1px; display: inline-block;">MEMBER
+                  STATEMENT OF ACCOUNT</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Member Details Box -->
+          <div
+            style="display: flex; justify-content: space-between; align-items: flex-start; background: var(--bg-slate-50); border: 1px solid var(--border-slate-300); padding: 12px 16px; border-radius: 6px; margin-bottom: 16px;">
+            <div>
+              <div style="font-size: 1.1rem; font-weight: 800; color: #000;">${data.n}</div>
+              <div style="font-size: 0.85rem; color: var(--text-slate-600); margin-top: 3px;">📍 Address: ${data.addr}</div>
+            </div>
+            <div style="text-align: right;">
+              <div style="font-size: 0.75rem; color: var(--text-slate-500); font-weight: 700; text-transform: uppercase;">Total
+                Contribution</div>
+              <div style="font-size: 1.25rem; font-weight: 900; color: #059669;">₹${formatMoney(data.tot)}</div>
+              <div style="font-size: 0.75rem; color: var(--text-slate-500); margin-top: 4px;">Date: ${data.date}</div>
+            </div>
+          </div>
+
+          <!-- Statement Table -->
+          <table style="width: 100%; border-collapse: collapse; border: 1.5px solid #000000; font-size: 0.85rem;">
+            <thead>
+              <tr style="background: var(--bg-slate-200); border-bottom: 1.5px solid #000000;">
+                <th style="padding: 6px 8px; border-right: 1px solid #000; text-align: left; font-weight: 800;">Date
+                </th>
+                <th
+                  style="padding: 6px 8px; border-right: 1px solid #000; text-align: center; font-weight: 800; width: 70px;">
+                  Vr No</th>
+                <th style="padding: 6px 8px; border-right: 1px solid #000; text-align: left; font-weight: 800;">
+                  Particulars / Description</th>
+                <th
+                  style="padding: 6px 8px; border-right: 1px solid #000; text-align: left; font-weight: 800; width: 110px;">
+                  Category</th>
+                <th style="padding: 6px 8px; text-align: right; font-weight: 800; width: 100px;">Amount (₹)</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows || `<tr><td colspan="5" style="text-align:center; padding: 20px; color: #94a3b8;">No transactions found</td></tr>`}
+            </tbody>
+            <tfoot>
+              <tr style="background: var(--bg-slate-100); border-top: 1.5px solid #000; font-weight: 900;">
+                <td colspan="4"
+                  style="padding: 8px; text-align: right; border-right: 1px solid #000; font-size: 0.9rem;">TOTAL
+                  CONTRIBUTION:</td>
+                <td style="padding: 8px; text-align: right; font-size: 0.95rem; color: #000;">₹${formatMoney(data.tot)}</td>
+              </tr>
+            </tfoot>
+          </table>
+
+          <div
+            style="margin-top: 24px; display: flex; justify-content: space-between; align-items: flex-end; font-size: 0.8rem; color: var(--text-slate-600);">
+            <div>Computer Generated Statement</div>
+            <div style="display: flex; gap: 20px;">
+              <div style="text-align: center; width: 120px; position: relative;">
+                <img src="Presidentsign.png"
+                  style="height: 46px; max-width: 120px; object-fit: contain; mix-blend-mode: multiply; filter: contrast(180%) brightness(1.05); margin-bottom: -10px; display: block; margin-left: auto; margin-right: auto;"
+                  onerror="this.onerror=null; this.src='data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs='">
+                <div style="border-bottom: 1px solid #000; margin-top: 2px;"></div>
+                <div style="font-weight: 800; color: #000; margin-top: 4px;">President</div>
+              </div>
+              <div style="text-align: center; width: 120px; position: relative;">
+                <img src="Secretarysign.png"
+                  style="height: 46px; max-width: 120px; object-fit: contain; mix-blend-mode: multiply; filter: contrast(180%) brightness(1.05); margin-bottom: -10px; display: block; margin-left: auto; margin-right: auto;"
+                  onerror="this.onerror=null; this.src='data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs='">
+                <div style="border-bottom: 1px solid #000; margin-top: 2px;"></div>
+                <div style="font-weight: 800; color: #000; margin-top: 4px;">Secretary</div>
+              </div>
+              <div style="text-align: center; width: 120px; position: relative;">
+                <img src="Treasurersign.png"
+                  style="height: 46px; max-width: 120px; object-fit: contain; mix-blend-mode: multiply; filter: contrast(180%) brightness(1.05); margin-bottom: -10px; display: block; margin-left: auto; margin-right: auto;"
+                  onerror="this.onerror=null; this.src='data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs='">
+                <div style="border-bottom: 1px solid #000; margin-top: 2px;"></div>
+                <div style="font-weight: 800; color: #000; margin-top: 4px;">Treasurer</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    window.onload = init;
+  </script>
+</body>
+</html>
+
+
+

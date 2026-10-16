@@ -1,0 +1,12 @@
+# Cloudflare Pages Redirects & Reverse Proxy
+# Proxy all API requests to the Render Backend
+/api/*  https://church-accounts-portal.onrender.com/api/:splat  200
+
+# Document viewers (/R-*, /P-*, /H-*, /L-*) route to view.html
+/R-*    /view.html  200
+/P-*    /view.html  200
+/H*     /view.html  200
+/L-*    /view.html  200
+
+# Single Page App routing fallback
+/*      /index.html 200

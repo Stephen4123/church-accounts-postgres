@@ -17,4 +17,4 @@ services:
       - key: AUTO_SEED
         value: "false"
       - key: DATABASE_URL
-        value: postgresql://neondb_owner:npg_8viZAFDn2SRz@ep-misty-scene-b4szd7kv-pooler.c-6.us-east-2.aws.neon.tech/neondb?sslmode=require
+        sync: false

@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS members (
     family_head VARCHAR(255) DEFAULT '',
     photo_url TEXT DEFAULT '',
     status VARCHAR(20) DEFAULT 'Active', -- Active, Inactive
+    is_active BOOLEAN DEFAULT TRUE,
     monthly_pledge NUMERIC(12, 2) DEFAULT 0.00,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
@@ -151,6 +152,9 @@ SELECT
   c.account_name,
   c.particulars as description,
   c.particulars,
+  c.voucher_no,
+  c.receipt,
+  c.payment,
   c.receipt as receipt_amount,
   c.payment as payment_amount,
   CASE WHEN c.receipt > 0 THEN c.receipt ELSE c.payment END as amount,
@@ -167,6 +171,12 @@ SELECT
   m.phone,
   c.bank_id,
   c.balance,
+  'State Bank of India'::varchar as bank_account,
+  ''::varchar as bank_subtype,
+  false::boolean as is_cheque,
+  ''::varchar as cheque_no,
+  false::boolean as is_printed,
+  false::boolean as is_cancelled,
   c.created_at,
   c.updated_at
 FROM cash_book c
@@ -177,11 +187,16 @@ SELECT
   b.id,
   b.date,
   b.voucher_no as vr_no,
+  b.voucher_no,
   b.cheque_no,
   b.bank_account,
   b.bank_account as account,
   b.particulars as description,
   b.particulars,
+  b.credit,
+  b.debit,
+  b.credit as receipt,
+  b.debit as payment,
   b.credit as receipt_amount,
   b.debit as payment_amount,
   CASE WHEN b.credit > 0 THEN b.credit ELSE b.debit END as amount,
@@ -197,6 +212,8 @@ SELECT
   m.name as account_name,
   b.cash_id,
   b.balance,
+  false::boolean as is_printed,
+  false::boolean as is_cancelled,
   b.created_at,
   b.updated_at
 FROM bank_book b

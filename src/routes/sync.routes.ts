@@ -987,7 +987,7 @@ router.post('/members', optionalAuth, async (req: Request, res: Response) => {
     let code = data.code || data.memberCode;
     if (isPostgres()) {
       if (!code) {
-        const cRes = await query("SELECT COALESCE(MAX(NULLIF(regexp_replace(member_code, '\\D', '', 'g'), '')::int), 0) as max_num FROM members");
+        const cRes = await query("SELECT COALESCE(MAX(NULLIF(regexp_replace(member_code, '\\D', '', 'g'), '')::int), 0) as max_num FROM members WHERE length(regexp_replace(member_code, '\\D', '', 'g')) <= 6");
         const nextNum = (cRes.rows[0]?.max_num || 0) + 1;
         code = `H${nextNum}`;
       }
@@ -1074,7 +1074,7 @@ router.put('/members/:id', optionalAuth, async (req: Request, res: Response) => 
         // Upsert as new member
         let code = data.code || data.memberCode;
         if (!code) {
-          const cRes = await query("SELECT COALESCE(MAX(NULLIF(regexp_replace(member_code, '\\D', '', 'g'), '')::int), 0) as max_num FROM members");
+          const cRes = await query("SELECT COALESCE(MAX(NULLIF(regexp_replace(member_code, '\\D', '', 'g'), '')::int), 0) as max_num FROM members WHERE length(regexp_replace(member_code, '\\D', '', 'g')) <= 6");
           const nextNum = (cRes.rows[0]?.max_num || 0) + 1;
           code = `H${nextNum}`;
         }

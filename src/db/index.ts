@@ -24,7 +24,8 @@ if (databaseUrl) {
       ssl: isProduction ? { rejectUnauthorized: false } : false,
       max: 20,
       idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: 5000
+      connectionTimeoutMillis: 30000,
+      keepAlive: true
     });
     isPostgresClient = true;
     console.log('📦 PostgreSQL Pool configured with connection string.');

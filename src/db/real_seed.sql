@@ -2,7 +2,7 @@
 -- REAL SEED DATA MIGRATED FROM FIRESTORE (CORRECTED)
 -- ========================================================
 BEGIN;
-TRUNCATE TABLE cash_book, bank_book, members, opening_balances, categories, users RESTART IDENTITY CASCADE;
+-- Safe insert seed data (truncate removed to protect production records)
 
 INSERT INTO opening_balances (financial_year, start_date, end_date, cash_amount, sbi_current_amount, sbi_fd_amount, notes) VALUES ('2026-2027', '2026-04-01', '2027-03-31', 127005.0, 143068.37, 108022.0, 'Migrated from Firestore') ON CONFLICT (financial_year) DO UPDATE SET cash_amount = EXCLUDED.cash_amount, sbi_current_amount = EXCLUDED.sbi_current_amount, sbi_fd_amount = EXCLUDED.sbi_fd_amount;
 INSERT INTO opening_balances (financial_year, start_date, end_date, cash_amount, sbi_current_amount, sbi_fd_amount, notes) VALUES ('default', '2026-04-01', '2027-03-31', 127005.0, 143068.37, 108022.0, 'Migrated from Firestore') ON CONFLICT (financial_year) DO UPDATE SET cash_amount = EXCLUDED.cash_amount, sbi_current_amount = EXCLUDED.sbi_current_amount, sbi_fd_amount = EXCLUDED.sbi_fd_amount;

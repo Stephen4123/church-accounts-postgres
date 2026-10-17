@@ -5,18 +5,24 @@
   console.log('[PG Bridge] Initializing PostgreSQL Firestore Bridge...');
 
   // Configure Backend URL:
-  // If hosted on Cloudflare Pages (ipchorebaccounts.pages.dev), calls route to the Render backend or proxy.
-  const isCloudflare = window.location.hostname.includes('pages.dev') || window.location.hostname.includes('cloudflare');
+  const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.hostname === '0.0.0.0';
+  const isRenderBackend = window.location.hostname.includes('onrender.com');
   const customBackend = window.CHURCH_BACKEND_URL || localStorage.getItem('church_backend_url');
   const defaultRenderBackend = 'https://church-accounts-portal.onrender.com';
   
-  const API_BASE = customBackend || (isCloudflare ? defaultRenderBackend : '');
+  // If running directly on Render or locally, use relative path (''); otherwise route all requests to Render backend
+  const API_BASE = customBackend || ((isLocalhost || isRenderBackend) ? '' : defaultRenderBackend);
   window.CHURCH_API_BASE = API_BASE;
   console.log('[PG Bridge] Backend API Base:', API_BASE || '(relative /api)');
 
   function apiFetch(endpoint, options = {}) {
     const url = endpoint.startsWith('http') ? endpoint : (API_BASE ? `${API_BASE}${endpoint}` : endpoint);
-    return fetch(url, options);
+    const token = localStorage.getItem('church_token');
+    const headers = { ...(options.headers || {}) };
+    if (token && !headers['Authorization'] && !headers['authorization']) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+    return fetch(url, { ...options, headers });
   }
   window.apiFetch = apiFetch;
 
@@ -242,6 +248,10 @@
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(item)
           });
+          if (!res.ok) {
+            const errBody = await res.json().catch(() => ({}));
+            throw new Error(errBody.message || `Server returned ${res.status}`);
+          }
           const resJson = await res.json().catch(() => null);
           if (resJson && resJson.success && resJson.data) {
             item = { ...item, ...resJson.data, _docId: String(resJson.data.id || resJson.id || this.id) };
@@ -252,6 +262,7 @@
           }
         } catch (e) {
           console.error(`[PG Bridge] Sync error for ${this.colName}:`, e);
+          throw e;
         }
         notifyDoc(this.colName, this.id);
         notifyCollection(this.colName);
@@ -272,6 +283,10 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(data)
         });
+        if (!res.ok) {
+          const errBody = await res.json().catch(() => ({}));
+          throw new Error(errBody.message || `Server returned ${res.status}`);
+        }
         const resJson = await res.json().catch(() => null);
         if (resJson && resJson.success && resJson.data) {
           const updated = resJson.data;
@@ -282,6 +297,7 @@
         }
       } catch (e) {
         console.error(`[PG Bridge] Update error for ${this.colName}:`, e);
+        throw e;
       }
       notifyDoc(this.colName, this.id);
       notifyCollection(this.colName);
@@ -394,34 +410,37 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(data)
         });
-        if (res.ok) {
-          const resJson = await res.json();
-          if (resJson.data) savedData = resJson.data;
-          else if (resJson.id) savedData.id = resJson.id;
+        if (!res.ok) {
+          const errBody = await res.json().catch(() => ({}));
+          throw new Error(errBody.message || `Server returned ${res.status}`);
+        }
+        const resJson = await res.json();
+        if (resJson.data) savedData = resJson.data;
+        else if (resJson.id) savedData.id = resJson.id;
 
-          // If a linked counterpart was created/updated (e.g. Contra), refresh the counterpart collection
-          if (this.colName === 'transactions' && savedData.bankId) {
-            apiFetch('/api/sync/all', { headers: { 'Authorization': `Bearer ${localStorage.getItem('church_token') || ''}` } })
-              .then(r => r.json())
-              .then(d => {
-                if (d.success && d.bank_transactions) {
-                  store.bank_transactions = d.bank_transactions;
-                  notifyCollection('bank_transactions');
-                }
-              }).catch(() => {});
-          } else if (this.colName === 'bank_transactions' && savedData.cashId) {
-            apiFetch('/api/sync/all', { headers: { 'Authorization': `Bearer ${localStorage.getItem('church_token') || ''}` } })
-              .then(r => r.json())
-              .then(d => {
-                if (d.success && d.transactions) {
-                  store.transactions = d.transactions;
-                  notifyCollection('transactions');
-                }
-              }).catch(() => {});
-          }
+        // If a linked counterpart was created/updated (e.g. Contra), refresh the counterpart collection
+        if (this.colName === 'transactions' && savedData.bankId) {
+          apiFetch('/api/sync/all', { headers: { 'Authorization': `Bearer ${localStorage.getItem('church_token') || ''}` } })
+            .then(r => r.json())
+            .then(d => {
+              if (d.success && d.bank_transactions) {
+                store.bank_transactions = d.bank_transactions;
+                notifyCollection('bank_transactions');
+              }
+            }).catch(() => {});
+        } else if (this.colName === 'bank_transactions' && savedData.cashId) {
+          apiFetch('/api/sync/all', { headers: { 'Authorization': `Bearer ${localStorage.getItem('church_token') || ''}` } })
+            .then(r => r.json())
+            .then(d => {
+              if (d.success && d.transactions) {
+                store.transactions = d.transactions;
+                notifyCollection('transactions');
+              }
+            }).catch(() => {});
         }
       } catch (e) {
-        if (!savedData.id) savedData.id = Date.now();
+        console.error(`[PG Bridge] Add error for ${this.colName}:`, e);
+        throw e;
       }
 
       if (!savedData.id) savedData.id = Date.now();

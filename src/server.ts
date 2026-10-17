@@ -5,6 +5,7 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 import { migrate } from './db/migrate';
+import { isPostgres } from './db';
 import authRoutes from './routes/auth.routes';
 import transactionsRoutes from './routes/transactions.routes';
 import bankRoutes from './routes/bank.routes';
@@ -39,6 +40,41 @@ app.use('/api/public', publicRoutes);
 // Health check endpoint for Render
 app.get('/health', (req: Request, res: Response) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// Database status & diagnostic endpoint to verify Neon in production
+app.get('/api/db-status', async (req: Request, res: Response) => {
+  const dbUrl = process.env.DATABASE_URL || '';
+  const maskedUrl = dbUrl ? dbUrl.replace(/:([^:@]+)@/, ':****@') : 'NOT_SET';
+  let txCount = 0;
+  let memCount = 0;
+  let dbErr: string | null = null;
+  const isPg = isPostgres();
+
+  if (isPg) {
+    try {
+      const { query } = await import('./db');
+      const tx = await query('SELECT count(*)::int as count FROM transactions');
+      txCount = tx.rows[0]?.count || 0;
+      const mem = await query('SELECT count(*)::int as count FROM members');
+      memCount = mem.rows[0]?.count || 0;
+    } catch (e: any) {
+      dbErr = e.message;
+    }
+  }
+
+  res.json({
+    status: 'ok',
+    isPostgres: isPg,
+    databaseConfigured: !!dbUrl,
+    databaseHost: dbUrl ? (dbUrl.split('@')[1] || '').split('/')[0] : 'none',
+    databaseUrlMasked: maskedUrl,
+    isNeon: dbUrl.includes('neon.tech'),
+    transactionsCount: txCount,
+    membersCount: memCount,
+    error: dbErr,
+    timestamp: new Date().toISOString()
+  });
 });
 
 // Clean URL rewrites matching the original reference repo

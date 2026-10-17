@@ -20,6 +20,7 @@ export async function migrate(): Promise<void> {
       await query(`
         ALTER TABLE cash_book ADD COLUMN IF NOT EXISTS sub_month VARCHAR(50) DEFAULT '';
         ALTER TABLE bank_book ADD COLUMN IF NOT EXISTS sub_month VARCHAR(50) DEFAULT '';
+        ALTER TABLE members ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE;
       `).catch(() => {});
 
       if (fs.existsSync(schemaPath)) {
@@ -48,11 +49,26 @@ export async function migrate(): Promise<void> {
       const txCheck = await query('SELECT count(*)::int as count FROM transactions');
       const txCount = txCheck.rows[0]?.count || 0;
 
-      if ((txCount <= 3 || process.env.AUTO_SEED === 'true') && fs.existsSync(realSeedPath)) {
+      if ((txCount === 0 || process.env.AUTO_SEED === 'force') && fs.existsSync(realSeedPath)) {
         console.log('📦 Populating PostgreSQL with real Firestore data (467 transactions, 193 members)...');
         const seedSql = fs.readFileSync(realSeedPath, 'utf8').replace(/^\uFEFF/, '');
-        await query(seedSql);
-        console.log('🎉 Real production data successfully populated into PostgreSQL!');
+        try {
+          await query(seedSql);
+          console.log('🎉 Real production data successfully populated into PostgreSQL!');
+        } catch (e: any) {
+          console.warn('⚠️ Bulk seed warning:', e.message, '- applying statements safely...');
+          const stmts = seedSql.split(/;\s*[\r\n]+/).map(s => s.trim()).filter(s => s && !s.startsWith('--') && s !== 'BEGIN' && s !== 'COMMIT');
+          let success = 0;
+          for (const s of stmts) {
+            try {
+              await query(s);
+              success++;
+            } catch (err: any) {
+              // Ignore duplicate keys or non-fatal errors
+            }
+          }
+          console.log(`✅ Seeded ${success}/${stmts.length} statements safely into PostgreSQL!`);
+        }
       } else {
         console.log(`ℹ️ PostgreSQL contains ${txCount} transactions.`);
       }

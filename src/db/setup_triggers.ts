@@ -31,11 +31,11 @@ export async function setupTriggers() {
         SELECT id INTO v_cat_id FROM categories WHERE LOWER(name) = LOWER(v_category) LIMIT 1;
 
         -- Calculate receipt / payment amounts
-        IF NEW.mode = 'Receipt' OR (NEW.receipt_amount IS NOT NULL AND NEW.receipt_amount > 0) THEN
-          v_receipt := COALESCE(NEW.receipt_amount, NEW.amount, 0.00);
+        IF NEW.mode = 'Receipt' OR (NEW.receipt_amount IS NOT NULL AND NEW.receipt_amount > 0) OR (NEW.receipt IS NOT NULL AND NEW.receipt > 0) THEN
+          v_receipt := COALESCE(NEW.receipt, NEW.receipt_amount, NEW.amount, 0.00);
           v_payment := 0.00;
         ELSE
-          v_payment := COALESCE(NEW.payment_amount, NEW.amount, 0.00);
+          v_payment := COALESCE(NEW.payment, NEW.payment_amount, NEW.amount, 0.00);
           v_receipt := 0.00;
         END IF;
 
@@ -44,7 +44,7 @@ export async function setupTriggers() {
           receipt, payment, category_id, category, sub_month, bank_id
         ) VALUES (
           COALESCE(NEW.date, CURRENT_DATE),
-          COALESCE(NEW.vr_no, ''),
+          COALESCE(NEW.vr_no, NEW.voucher_no, ''),
           v_member_id,
           v_account_name,
           v_particulars,
@@ -59,17 +59,17 @@ export async function setupTriggers() {
         RETURN NEW;
 
       ELSIF TG_OP = 'UPDATE' THEN
-        IF NEW.mode = 'Receipt' OR (NEW.receipt_amount IS NOT NULL AND NEW.receipt_amount > 0) THEN
-          v_receipt := COALESCE(NEW.receipt_amount, NEW.amount, 0.00);
+        IF NEW.mode = 'Receipt' OR (NEW.receipt_amount IS NOT NULL AND NEW.receipt_amount > 0) OR (NEW.receipt IS NOT NULL AND NEW.receipt > 0) THEN
+          v_receipt := COALESCE(NEW.receipt, NEW.receipt_amount, NEW.amount, 0.00);
           v_payment := 0.00;
         ELSE
-          v_payment := COALESCE(NEW.payment_amount, NEW.amount, 0.00);
+          v_payment := COALESCE(NEW.payment, NEW.payment_amount, NEW.amount, 0.00);
           v_receipt := 0.00;
         END IF;
 
         UPDATE cash_book SET
           date = COALESCE(NEW.date, date),
-          voucher_no = COALESCE(NEW.vr_no, voucher_no),
+          voucher_no = COALESCE(NEW.vr_no, NEW.voucher_no, voucher_no),
           account_name = COALESCE(NEW.account_name, account_name),
           particulars = COALESCE(NEW.particulars, NEW.description, particulars),
           receipt = v_receipt,
@@ -124,11 +124,13 @@ export async function setupTriggers() {
 
         IF NEW.mode ILIKE '%Receipt%' OR NEW.mode ILIKE '%Credit%' OR NEW.mode ILIKE '%Deposit%' 
            OR v_particulars ILIKE '%cash deposit%' OR v_category ILIKE '%cash deposit%'
-           OR (NEW.receipt_amount IS NOT NULL AND NEW.receipt_amount > 0) OR (NEW.credit IS NOT NULL AND NEW.credit > 0) THEN
-          v_credit := COALESCE(NEW.receipt_amount, NEW.credit, NEW.amount, 0.00);
+           OR (NEW.receipt_amount IS NOT NULL AND NEW.receipt_amount > 0)
+           OR (NEW.credit IS NOT NULL AND NEW.credit > 0)
+           OR (NEW.receipt IS NOT NULL AND NEW.receipt > 0) THEN
+          v_credit := COALESCE(NEW.credit, NEW.receipt, NEW.receipt_amount, NEW.amount, 0.00);
           v_debit := 0.00;
         ELSE
-          v_debit := COALESCE(NEW.payment_amount, NEW.debit, NEW.amount, 0.00);
+          v_debit := COALESCE(NEW.debit, NEW.payment, NEW.payment_amount, NEW.amount, 0.00);
           v_credit := 0.00;
         END IF;
 
@@ -138,7 +140,7 @@ export async function setupTriggers() {
         ) VALUES (
           COALESCE(NEW.date, CURRENT_DATE),
           COALESCE(NEW.cheque_no, ''),
-          COALESCE(NEW.vr_no, ''),
+          COALESCE(NEW.vr_no, NEW.voucher_no, ''),
           v_bank_acc,
           v_member_id,
           v_particulars,
@@ -155,18 +157,20 @@ export async function setupTriggers() {
       ELSIF TG_OP = 'UPDATE' THEN
         IF NEW.mode ILIKE '%Receipt%' OR NEW.mode ILIKE '%Credit%' OR NEW.mode ILIKE '%Deposit%' 
            OR v_particulars ILIKE '%cash deposit%' OR v_category ILIKE '%cash deposit%'
-           OR (NEW.receipt_amount IS NOT NULL AND NEW.receipt_amount > 0) OR (NEW.credit IS NOT NULL AND NEW.credit > 0) THEN
-          v_credit := COALESCE(NEW.receipt_amount, NEW.credit, NEW.amount, 0.00);
+           OR (NEW.receipt_amount IS NOT NULL AND NEW.receipt_amount > 0)
+           OR (NEW.credit IS NOT NULL AND NEW.credit > 0)
+           OR (NEW.receipt IS NOT NULL AND NEW.receipt > 0) THEN
+          v_credit := COALESCE(NEW.credit, NEW.receipt, NEW.receipt_amount, NEW.amount, 0.00);
           v_debit := 0.00;
         ELSE
-          v_debit := COALESCE(NEW.payment_amount, NEW.debit, NEW.amount, 0.00);
+          v_debit := COALESCE(NEW.debit, NEW.payment, NEW.payment_amount, NEW.amount, 0.00);
           v_credit := 0.00;
         END IF;
 
         UPDATE bank_book SET
           date = COALESCE(NEW.date, date),
           cheque_no = COALESCE(NEW.cheque_no, cheque_no),
-          voucher_no = COALESCE(NEW.vr_no, voucher_no),
+          voucher_no = COALESCE(NEW.vr_no, NEW.voucher_no, voucher_no),
           bank_account = COALESCE(NEW.bank_account, NEW.account, bank_account),
           particulars = COALESCE(NEW.particulars, NEW.description, particulars),
           credit = v_credit,

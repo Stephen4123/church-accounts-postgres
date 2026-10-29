@@ -83,7 +83,7 @@ router.get('/summary', authenticateToken, async (req: AuthenticatedRequest, res:
       for (const row of txRes.rows) {
         const amt = parseFloat(row.amount) || 0;
         const isReceipt = String(row.mode).includes('Receipt') || String(row.mode).includes('Deposit') || String(row.mode).includes('Credit');
-        const acc = String(row.account).toLowerCase();
+        const acc = String(row.account || row.bank_account || '').toLowerCase();
 
         if (acc.includes('fixed deposit') || acc.includes('fd')) {
           currentFd += isReceipt ? amt : -amt;
@@ -112,7 +112,7 @@ router.get('/summary', authenticateToken, async (req: AuthenticatedRequest, res:
     for (const b of memoryStore.bank_transactions) {
       const amt = Number(b.amount || 0);
       const isReceipt = String(b.mode).includes('Receipt') || String(b.mode).includes('Deposit') || String(b.mode).includes('Credit');
-      const acc = String(b.account).toLowerCase();
+      const acc = String(b.account || b.bank_account || '').toLowerCase();
 
       if (acc.includes('fixed deposit') || acc.includes('fd')) {
         currentFd += isReceipt ? amt : -amt;

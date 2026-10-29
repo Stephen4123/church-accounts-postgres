@@ -2390,7 +2390,9 @@ body.role-committee .editor-only,
       .main-workspace {
         height: 100% !important;
         max-height: 100% !important;
-        overflow: hidden !important;
+        overflow-y: auto !important;
+        overflow-x: hidden !important;
+        -webkit-overflow-scrolling: touch !important;
         padding-top: 8px !important;
         padding-bottom: 8px !important;
         padding-left: 12px !important;
@@ -2416,11 +2418,7 @@ body.role-committee .editor-only,
 
       /* Allow Member Ledger left list and other inner tables to scroll independently */
       .page-tab.active,
-      .flex-tab.active,
-      .cashbook-container {
-        height: 100% !important;
-        max-height: 100% !important;
-        overflow: hidden !important;
+      .flex-tab.active {
         display: flex !important;
         flex-direction: column !important;
       }
@@ -3183,22 +3181,76 @@ button[onclick*="delete"] {
 #editTab.active,
 #settingsTab.active,
 #memberStatementTab.active,
-#subscriptionsTab.active,
-.page-tab.active {
-  min-height: fit-content;
+#subscriptionsTab.active {
+  height: auto !important;
+  min-height: fit-content !important;
+  max-height: none !important;
   overflow-y: visible !important;
+  overflow-x: hidden !important;
+  display: flex !important;
+  flex-direction: column !important;
 }
 
+#entryTab .cashbook-container,
+#editTab .cashbook-container,
 #statementTab .cashbook-container {
   height: auto !important;
-  min-height: 100% !important;
+  min-height: fit-content !important;
+  max-height: none !important;
   overflow: visible !important;
+  flex: 0 0 auto !important;
+}
+
+/* Sheet/Log Tabs maintain full viewport height and scroll within their table wrapper */
+#transactionsTab.active,
+#bankBookTab.active,
+#ledgerTab.active,
+#membersTab.active,
+#offeringTab.active,
+#charityTab.active,
+#suspenseTab.active {
+  height: 100% !important;
+  max-height: 100% !important;
+  overflow: hidden !important;
+  display: flex !important;
+  flex-direction: column !important;
+  box-sizing: border-box !important;
+}
+
+#transactionsTab.active .cashbook-container,
+#bankBookTab.active .cashbook-container,
+#ledgerTab.active .cashbook-container,
+#membersTab.active .cashbook-container,
+#offeringTab.active .cashbook-container,
+#charityTab.active .cashbook-container,
+#suspenseTab.active .cashbook-container {
+  height: 100% !important;
+  max-height: 100% !important;
+  overflow: hidden !important;
+  display: flex !important;
+  flex-direction: column !important;
+  flex: 1 !important;
+  min-height: 0 !important;
+}
+
+/* Modal box cards can scroll smoothly if content exceeds viewport */
+.modal-card {
+  max-height: calc(100vh - 60px) !important;
+  max-height: calc(100dvh - 60px) !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  -webkit-overflow-scrolling: touch !important;
 }
 
 /* Ensure inner table containers maintain their dedicated scrollbars */
 .sheet-table-wrapper {
   overflow-x: auto !important;
   overflow-y: auto !important;
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  height: auto !important;
+  max-height: 100% !important;
+  -webkit-overflow-scrolling: touch !important;
   scrollbar-width: thin !important;
   scrollbar-color: #cbd5e1 transparent !important;
 }
@@ -3263,16 +3315,163 @@ button[onclick*="delete"] {
   background: #0b1120 !important;
 }
 
+/* Sidebar Dark Theme */
 [data-theme="dark"] .sidebar {
   background: #090d16 !important;
   border-right-color: #1e293b !important;
 }
 
+[data-theme="dark"] .sidebar-brand {
+  border-bottom-color: #1e293b !important;
+}
+
+[data-theme="dark"] .brand-title {
+  color: #f8fafc !important;
+}
+
+[data-theme="dark"] .brand-subtitle {
+  background: rgba(37, 99, 235, 0.2) !important;
+  border-color: rgba(59, 130, 246, 0.35) !important;
+  color: #93c5fd !important;
+}
+
+[data-theme="dark"] .brand-logo-wrap {
+  background: #0f172a !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4), 0 0 0 1px #334155 !important;
+}
+
+[data-theme="dark"] .sidebar-close-btn {
+  color: #94a3b8 !important;
+}
+
+/* Sidebar Navigation Items */
+[data-theme="dark"] .nav-item {
+  color: #94a3b8 !important;
+}
+
+[data-theme="dark"] .nav-item:hover {
+  background: #1e293b !important;
+  color: #f8fafc !important;
+}
+
+[data-theme="dark"] .nav-item.active {
+  background: rgba(59, 130, 246, 0.16) !important;
+  color: #60a5fa !important;
+  border-color: #3b82f6 !important;
+  box-shadow: 0 1px 8px rgba(59, 130, 246, 0.25) !important;
+}
+
+[data-theme="dark"] .nav-item:active {
+  background: #0f172a !important;
+}
+
+/* Sidebar Bottom User Profile Card */
+[data-theme="dark"] .sidebar-footer {
+  border-top-color: #1e293b !important;
+}
+
+[data-theme="dark"] .sidebar-user-card,
 [data-theme="dark"] .sidebar-bottom-user {
   background: #0f172a !important;
   border-color: #1e293b !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3) !important;
 }
 
+[data-theme="dark"] .sidebar-user-card:hover {
+  border-color: #334155 !important;
+}
+
+[data-theme="dark"] #sidebarUserInfo {
+  color: #f8fafc !important;
+}
+
+[data-theme="dark"] #sidebarUserRole {
+  color: #94a3b8 !important;
+}
+
+[data-theme="dark"] .sidebar-logout-btn {
+  background: rgba(239, 68, 68, 0.15) !important;
+  border-color: rgba(239, 68, 68, 0.3) !important;
+  color: #f87171 !important;
+}
+
+[data-theme="dark"] .sidebar-logout-btn:hover {
+  background: rgba(239, 68, 68, 0.25) !important;
+  border-color: rgba(239, 68, 68, 0.5) !important;
+  color: #fca5a5 !important;
+}
+
+[data-theme="dark"] .sidebar-sound-icon-btn {
+  background: #1e293b !important;
+  border-color: #334155 !important;
+  color: #cbd5e1 !important;
+}
+
+[data-theme="dark"] .sidebar-sound-icon-btn:hover {
+  background: #334155 !important;
+  color: #f8fafc !important;
+}
+
+/* Header Action Controls & Buttons */
+[data-theme="dark"] #headerSoundToggleBtn,
+[data-theme="dark"] #headerThemeToggleBtn {
+  background: #1e293b !important;
+  border-color: #334155 !important;
+  color: #e2e8f0 !important;
+}
+
+[data-theme="dark"] #headerSoundToggleBtn:hover,
+[data-theme="dark"] #headerThemeToggleBtn:hover {
+  background: #334155 !important;
+  color: #ffffff !important;
+}
+
+[data-theme="dark"] .cb-top-btn {
+  background: #1e293b !important;
+  border-color: #334155 !important;
+  color: #e2e8f0 !important;
+}
+
+[data-theme="dark"] .cb-top-btn:hover {
+  background: #334155 !important;
+  color: #ffffff !important;
+}
+
+[data-theme="dark"] .cb-header-title {
+  color: #f8fafc !important;
+}
+
+[data-theme="dark"] .cb-header-subtitle {
+  color: #94a3b8 !important;
+}
+
+[data-theme="dark"] .cb-header-desc {
+  color: #94a3b8 !important;
+}
+
+/* Financial Year Pill & Select */
+[data-theme="dark"] .top-fy-pill {
+  background: #0f172a !important;
+  border-color: #334155 !important;
+  color: #f8fafc !important;
+}
+
+[data-theme="dark"] .top-fy-pill span {
+  color: #60a5fa !important;
+}
+
+[data-theme="dark"] #globalFySelect {
+  background: transparent !important;
+  color: #f8fafc !important;
+  border: none !important;
+}
+
+[data-theme="dark"] #globalFySelect option {
+  background: #0f172a !important;
+  color: #f8fafc !important;
+}
+
+/* Cards & Tables */
 [data-theme="dark"] .statement-header-card,
 [data-theme="dark"] .cb-table-card,
 [data-theme="dark"] .sheet-card,
@@ -3300,6 +3499,50 @@ button[onclick*="delete"] {
   color: #e2e8f0 !important;
 }
 
+[data-theme="dark"] .dash-filler-row td {
+  border-bottom-color: #1e293b !important;
+}
+
+/* Dashboard Summary & Total Rows */
+[data-theme="dark"] .dashboard-total-row,
+[data-theme="dark"] #incomeTableBody tr:last-child,
+[data-theme="dark"] #expenseTableBody tr:last-child {
+  background: #0f172a !important;
+  border-top-color: #334155 !important;
+  border-bottom-color: #334155 !important;
+}
+
+[data-theme="dark"] .dashboard-total-row td,
+[data-theme="dark"] #incomeTableBody tr:last-child td,
+[data-theme="dark"] #expenseTableBody tr:last-child td {
+  color: #f8fafc !important;
+}
+
+[data-theme="dark"] .dash-balances-container {
+  border-top-color: #334155 !important;
+  background: #0f172a !important;
+}
+
+[data-theme="dark"] .dash-closing-balance-row {
+  background: rgba(30, 58, 138, 0.3) !important;
+  border-top-color: #3b82f6 !important;
+}
+
+[data-theme="dark"] .dash-closing-balance-row td,
+[data-theme="dark"] .dash-closing-balance-row td span {
+  color: #93c5fd !important;
+}
+
+[data-theme="dark"] .dash-grand-total-row {
+  background: #0f172a !important;
+  border-top-color: #334155 !important;
+}
+
+[data-theme="dark"] .dash-grand-total-row td {
+  color: #f8fafc !important;
+}
+
+/* Forms, Toggles & Mode Switchers */
 [data-theme="dark"] input,
 [data-theme="dark"] select,
 [data-theme="dark"] textarea {
@@ -3313,6 +3556,60 @@ button[onclick*="delete"] {
   color: #64748b !important;
 }
 
+[data-theme="dark"] .mode-switcher,
+[data-theme="dark"] .seg-main {
+  background: #0f172a !important;
+  border: 1px solid #334155 !important;
+}
+
+[data-theme="dark"] .mode-btn {
+  color: #94a3b8 !important;
+}
+
+[data-theme="dark"] .mode-btn:hover:not(.active) {
+  color: #f8fafc !important;
+}
+
+[data-theme="dark"] .mode-btn.active,
+[data-theme="dark"] .seg-main .mode-btn.active {
+  background: #1e293b !important;
+  color: #f8fafc !important;
+}
+
+[data-theme="dark"] .mode-btn.receipt-mode.active,
+[data-theme="dark"] .seg-main.primary-toggle .mode-btn.active.receipt-mode {
+  background: #064e3b !important;
+  color: #34d399 !important;
+  border-color: #059669 !important;
+}
+
+[data-theme="dark"] .mode-btn.payment-mode.active,
+[data-theme="dark"] .seg-main.primary-toggle .mode-btn.active.payment-mode {
+  background: #7f1d1d !important;
+  color: #f87171 !important;
+  border-color: #dc2626 !important;
+}
+
+[data-theme="dark"] #bankAccountWrapper,
+[data-theme="dark"] #edit_bankAccountWrapper {
+  background: #0f172a !important;
+  border-color: #334155 !important;
+}
+
+[data-theme="dark"] .edit-header-gradient {
+  background: #0f172a !important;
+  border-color: #334155 !important;
+}
+
+[data-theme="dark"] .entry-balance-pill {
+  background: rgba(30, 58, 138, 0.3) !important;
+  border-color: #1e40af !important;
+}
+
+[data-theme="dark"] .entry-balance-pill span {
+  color: #93c5fd !important;
+}
+
 [data-theme="dark"] .cb-table-card table tr:hover,
 [data-theme="dark"] .cashbook-sheet-table tr:hover {
   background: rgba(255, 255, 255, 0.04) !important;
@@ -3322,5 +3619,64 @@ button[onclick*="delete"] {
 [data-theme="dark"] .sheet-table-wrapper::-webkit-scrollbar-thumb {
   background: #334155 !important;
 }
+
+/* =========================================================================
+   DASHBOARD DATA DRILLDOWN / BREAKDOWN REDIRECTION STYLES
+   ========================================================================= */
+.dashboard-clickable-row {
+  cursor: pointer !important;
+  user-select: none;
+  transition: background-color 0.15s ease, transform 0.1s ease;
+}
+
+.dashboard-clickable-row:hover {
+  background-color: #f1f5f9 !important;
+}
+
+.dashboard-clickable-row:hover .dash-row-drill-icon {
+  opacity: 1 !important;
+  color: #2563eb !important;
+  transform: translate(2px, -2px) scale(1.15);
+}
+
+.dashboard-clickable-row:active {
+  background-color: #e2e8f0 !important;
+  transform: scale(0.998);
+}
+
+.dash-drill-hint-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  animation: pulse-hint 2.5s infinite;
+}
+
+@keyframes pulse-hint {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.2);
+  }
+  50% {
+    box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.1);
+  }
+}
+
+[data-theme="dark"] .dashboard-clickable-row:hover {
+  background-color: #1e293b !important;
+}
+
+[data-theme="dark"] .dashboard-clickable-row:hover .dash-row-drill-icon {
+  color: #60a5fa !important;
+}
+
+[data-theme="dark"] .dashboard-clickable-row:active {
+  background-color: #334155 !important;
+}
+
+[data-theme="dark"] .dash-drill-hint-badge {
+  background: #1e293b !important;
+  color: #93c5fd !important;
+  border-color: #3b82f6 !important;
+}
+
 
 

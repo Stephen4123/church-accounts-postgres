@@ -55,6 +55,40 @@ router.get('/dashboard', authenticateToken, async (req: AuthenticatedRequest, re
       cashHand += (r - p);
     }
 
+    // Merge unlinked bank contra transfers for Cash in Hand
+    for (const b of bankTransactions) {
+      const desc = String(b.description || b.particulars || '').toLowerCase();
+      const bsub = String(b.bank_subtype || b.subtype || '').toLowerCase();
+      const isContra = desc.includes('cash deposit') || desc.includes('cash withdrawal') || bsub.includes('cash deposit') || bsub.includes('cash withdrawal');
+      if (!isContra) continue;
+
+      const amt = parseFloat(b.amount) || 0;
+      if (amt <= 0) continue;
+
+      const hasMatch = transactions.some(t => {
+        if (t.bank_id && t.bank_id == b.id) return true;
+        if (t.date && b.date && String(t.date).slice(0, 10) === String(b.date).slice(0, 10)) {
+          const tAmt = parseFloat(t.amount || t.receipt_amount || t.payment_amount || 0);
+          if (Math.abs(tAmt - amt) < 0.01) {
+            const tDesc = String(t.description || t.particulars || '').toLowerCase();
+            return tDesc.includes('cash deposit') || tDesc.includes('cash withdrawal') || tDesc.includes('contra');
+          }
+        }
+        return false;
+      });
+
+      if (!hasMatch) {
+        const isDeposit = desc.includes('cash deposit') || bsub.includes('cash deposit');
+        if (isDeposit) {
+          totalCashPayments += amt;
+          cashHand -= amt;
+        } else {
+          totalCashReceipts += amt;
+          cashHand += amt;
+        }
+      }
+    }
+
     // 2. Calculate Bank Balances
     let sbiCurrentBal = opSbi;
     let sbiFdBal = opFd;
@@ -64,7 +98,7 @@ router.get('/dashboard', authenticateToken, async (req: AuthenticatedRequest, re
     for (const b of bankTransactions) {
       const amt = parseFloat(b.amount) || 0;
       const isReceipt = String(b.mode).includes('Receipt') || String(b.mode).includes('Deposit') || String(b.mode).includes('Credit');
-      const acc = String(b.account).toLowerCase();
+      const acc = String(b.account || b.bank_account || '').toLowerCase();
 
       if (isReceipt) totalBankDeposits += amt;
       else totalBankWithdrawals += amt;
@@ -86,13 +120,15 @@ router.get('/dashboard', authenticateToken, async (req: AuthenticatedRequest, re
     let totalExpenditure = 0;
 
     for (const tx of transactions) {
+      const desc = String(tx.description || tx.particulars || '').toLowerCase();
+      const sub = tx.subtype || 'Other';
       const isContra = tx.type === 'Contra' || 
-                       (tx.subtype && tx.subtype.toLowerCase().includes('contra')) || 
-                       (tx.bank_subtype && tx.bank_subtype.toLowerCase().includes('contra'));
+                       sub.toLowerCase().includes('contra') || 
+                       (tx.bank_subtype && tx.bank_subtype.toLowerCase().includes('contra')) ||
+                       desc.includes('cash deposit') || desc.includes('cash withdrawal');
       if (isContra) continue;
 
       const amt = parseFloat(tx.amount) || 0;
-      const sub = tx.subtype || 'Other';
 
       if (tx.mode === 'Receipt') {
         incomeCategories[sub] = (incomeCategories[sub] || 0) + amt;
@@ -100,6 +136,36 @@ router.get('/dashboard', authenticateToken, async (req: AuthenticatedRequest, re
       } else if (tx.mode === 'Payment') {
         expenseCategories[sub] = (expenseCategories[sub] || 0) + amt;
         totalExpenditure += amt;
+      }
+    }
+
+    // Include Bank Interest in Income (prioritizing category)
+    for (const b of bankTransactions) {
+      const desc = String(b.description || b.particulars || '').toLowerCase();
+      const bsub = String(b.bank_subtype || b.subtype || '').toLowerCase();
+      const vr = String(b.vr_no || b.voucher_no || '').toLowerCase();
+      const cat = String(b.category || '').toLowerCase();
+
+      const isExplicitBankInterest = cat === 'bank interest (income)' || cat === 'bank interest' || cat.includes('bank interest') ||
+                                     bsub === 'bank interest (income)' || bsub === 'bank interest' || bsub.includes('bank interest');
+      const isExplicitSodari = cat.includes('sodari') || cat.includes('sodhari') || bsub.includes('sodari') || bsub.includes('sodhari');
+
+      const isOtherExplicitCategory = cat.includes('subscription') || cat.includes('donation') || cat.includes('offertory') || cat.includes('offering') || cat.includes('charity');
+
+      const allText = `${desc} ${bsub} ${vr} ${cat}`;
+      const isFallbackInterest = !isOtherExplicitCategory && (
+        allText.includes('interest') || /\bint(\.|\b|\d)/i.test(allText) || vr.startsWith('int') || vr.includes('int1') || vr.includes('int2')
+      );
+
+      const isInterest = isExplicitBankInterest || isExplicitSodari || isFallbackInterest;
+      if (isInterest && !isOtherExplicitCategory) {
+        const amt = parseFloat(b.credit) || parseFloat(b.amount) || parseFloat(b.receipt) || 0;
+        if (amt > 0) {
+          const isSodari = isExplicitSodari || (!isExplicitBankInterest && (allText.includes('sodari') || allText.includes('sodhari')));
+          const sub = isSodari ? 'Sodari Samajam for Deposit' : 'Bank Interest (Income)';
+          incomeCategories[sub] = (incomeCategories[sub] || 0) + amt;
+          totalIncome += amt;
+        }
       }
     }
 
@@ -275,16 +341,25 @@ router.get('/subscriptions-matrix', authenticateToken, async (req: Authenticated
       const mRes = await query('SELECT id, member_code, name, phone FROM members ORDER BY member_code ASC');
       members = mRes.rows;
       const tRes = await query(`
-        SELECT member_code, sub_month, amount, date, vr_no FROM transactions
-        WHERE is_cancelled = false AND (subtype ILIKE '%subscription%' OR subtype ILIKE '%tithe%')
+        SELECT member_code, account_name, sub_month, amount, date, vr_no, particulars FROM transactions
+        WHERE is_cancelled = false AND (type ILIKE '%subscription%' OR category ILIKE '%subscription%' OR subtype ILIKE '%subscription%' OR subtype ILIKE '%tithe%' OR particulars ILIKE '%subscription%')
+        UNION ALL
+        SELECT member_code, account_name, sub_month, amount, date, vr_no, particulars FROM bank_transactions
+        WHERE is_cancelled = false AND (type ILIKE '%subscription%' OR category ILIKE '%subscription%' OR subtype ILIKE '%subscription%' OR bank_subtype ILIKE '%subscription%' OR particulars ILIKE '%subscription%')
       `);
       transactions = tRes.rows;
     } else {
       members = memoryStore.members;
-      transactions = memoryStore.transactions.filter(t => 
-        !t.is_cancelled && 
-        (String(t.subtype).toLowerCase().includes('subscription') || String(t.subtype).toLowerCase().includes('tithe'))
-      );
+      transactions = [
+        ...memoryStore.transactions.filter(t => 
+          !t.is_cancelled && 
+          (String(t.type || '').toLowerCase().includes('subscription') || String(t.category || '').toLowerCase().includes('subscription') || String(t.subtype || '').toLowerCase().includes('subscription') || String(t.subtype || '').toLowerCase().includes('tithe') || String(t.particulars || '').toLowerCase().includes('subscription'))
+        ),
+        ...(memoryStore.bank_transactions || []).filter(t =>
+          !t.is_cancelled &&
+          (String(t.type || '').toLowerCase().includes('subscription') || String(t.category || '').toLowerCase().includes('subscription') || String(t.subtype || '').toLowerCase().includes('subscription') || String(t.bank_subtype || '').toLowerCase().includes('subscription') || String(t.particulars || '').toLowerCase().includes('subscription'))
+        )
+      ];
     }
 
     const matrix = members.map(m => {

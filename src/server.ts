@@ -29,6 +29,10 @@ app.use(express.static(publicPath));
 
 // API Endpoints
 app.use('/api/sync', syncRoutes);
+app.use('/api/categories', (req, res, next) => {
+  req.url = '/categories' + (req.url === '/' ? '' : req.url);
+  syncRoutes(req, res, next);
+});
 app.use('/api/auth', authRoutes);
 app.use('/api/transactions', transactionsRoutes);
 app.use('/api/bank', bankRoutes);
@@ -40,6 +44,29 @@ app.use('/api/public', publicRoutes);
 // Health check endpoint for Render
 app.get('/health', (req: Request, res: Response) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+app.get('/api/test-calc', async (req: Request, res: Response) => {
+  try {
+    const { query } = await import('./db');
+    const cashRes = await query('SELECT * FROM cash_book ORDER BY id ASC');
+    const bankRes = await query('SELECT * FROM bank_book ORDER BY id ASC');
+    const openRes = await query('SELECT * FROM opening_balances WHERE financial_year = $1', ['2026-2027']);
+    
+    // We can run the same classifyCategory logic here!
+    res.json({
+      cashCount: cashRes.rows.length,
+      bankCount: bankRes.rows.length,
+      opening: openRes.rows[0],
+      firstFruits: cashRes.rows.filter(r => String(r.particulars + r.category + r.subtype).toLowerCase().includes('first fruit')),
+      monthlyMeeting: cashRes.rows.filter(r => String(r.particulars + r.category + r.subtype + r.type).toLowerCase().includes('monthly meeting')),
+      purchases: cashRes.rows.filter(r => String(r.particulars + r.category + r.subtype).toLowerCase().includes('purchase')),
+      donations: cashRes.rows.filter(r => String(r.particulars + r.category + r.subtype).toLowerCase().includes('donation')),
+      generalBody: cashRes.rows.filter(r => String(r.particulars + r.category + r.subtype).toLowerCase().includes('general body') || String(r.particulars + r.category + r.subtype).toLowerCase().includes('anniversary'))
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Database status & diagnostic endpoint to verify Neon in production

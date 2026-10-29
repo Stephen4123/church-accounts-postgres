@@ -2382,7 +2382,7 @@ function handleHashChange() {
   switchTab(targetTabId, true);
 }
 
-let nextReceiptVrNo = 1;
+let nextReceiptVrNo = 6701;
 let nextPaymentVrNo = 1;
 let activeMembersMap = {};
 let membersDataStore = [];
@@ -2430,6 +2430,303 @@ let subTypesConfig = {
   "Other Income": ["Donations", "First fruits", "Anniversary Contributions Received", "Sodari Samajam"],
   "Monthly Meeting": ["Monthly Meeting Collection", "Monthly Meeting Expenses", "General Body / Committee Meeting", "Fasting Prayer Meeting"]
 };
+
+let globalRawCategories = [];
+
+function applyDatabaseCategories(categoriesList) {
+  if (!Array.isArray(categoriesList) || categoriesList.length === 0) return;
+  globalRawCategories = categoriesList;
+  window.dbCategories = categoriesList;
+
+  const dynamicSubtypes = {
+    "Ledger": [],
+    "Charity": [],
+    "Other Income": [],
+    "Monthly Meeting": []
+  };
+
+  categoriesList.forEach(c => {
+    const name = (c.name || '').trim();
+    const grp = (c.group_name || '').trim();
+    const type = c.type || 'Both';
+    if (!name || name === '-- None / General --' || name === 'None / General') return;
+
+    if (grp === 'Ledger' || (!grp && type === 'Payment' && !name.toLowerCase().includes('contra') && !name.toLowerCase().includes('charity') && !name.toLowerCase().includes('monthly'))) {
+      if (!dynamicSubtypes["Ledger"].some(x => (typeof x === 'string' ? x : x.name) === name)) {
+        dynamicSubtypes["Ledger"].push({ name: name, mode: 'Payment' });
+      }
+    } else if (grp === 'Charity' || name.toLowerCase().includes('charity')) {
+      if (!dynamicSubtypes["Charity"].some(x => (typeof x === 'string' ? x : x.name) === name)) {
+        dynamicSubtypes["Charity"].push({ name: name, mode: type });
+      }
+    } else if (grp === 'Monthly Meeting' || name.toLowerCase().includes('monthly meeting') || name.toLowerCase().includes('prayer meeting') || name.toLowerCase().includes('committee meeting')) {
+      if (!dynamicSubtypes["Monthly Meeting"].some(x => (typeof x === 'string' ? x : x.name) === name)) {
+        dynamicSubtypes["Monthly Meeting"].push({ name: name, mode: type });
+      }
+    } else if (grp === 'Other Income' || (!grp && type === 'Receipt' && !name.toLowerCase().includes('subscription') && !name.toLowerCase().includes('offering') && !name.toLowerCase().includes('contra'))) {
+      if (!dynamicSubtypes["Other Income"].some(x => (typeof x === 'string' ? x : x.name) === name)) {
+        dynamicSubtypes["Other Income"].push({ name: name, mode: 'Receipt' });
+      }
+    } else if (grp && !['Subscription', 'Offering', 'Contra', 'Bank', 'General'].includes(grp)) {
+      if (!dynamicSubtypes[grp]) dynamicSubtypes[grp] = [];
+      if (!dynamicSubtypes[grp].some(x => (typeof x === 'string' ? x : x.name) === name)) {
+        dynamicSubtypes[grp].push({ name: name, mode: type });
+      }
+      if (typeof globalFieldRules !== 'undefined' && !globalFieldRules[grp]) {
+        globalFieldRules[grp] = { showAccount: true, showAddress: false, showSubtype: true, showMonth: false, mode: type };
+      }
+    }
+  });
+
+  if (dynamicSubtypes["Ledger"].length > 0) subTypesConfig["Ledger"] = dynamicSubtypes["Ledger"];
+  if (dynamicSubtypes["Other Income"].length > 0) subTypesConfig["Other Income"] = dynamicSubtypes["Other Income"];
+  if (dynamicSubtypes["Charity"].length > 0) subTypesConfig["Charity"] = dynamicSubtypes["Charity"];
+  if (dynamicSubtypes["Monthly Meeting"].length > 0) subTypesConfig["Monthly Meeting"] = dynamicSubtypes["Monthly Meeting"];
+
+  Object.keys(dynamicSubtypes).forEach(k => {
+    if (!subTypesConfig[k] && dynamicSubtypes[k].length > 0) {
+      subTypesConfig[k] = dynamicSubtypes[k];
+    }
+  });
+
+  // Re-populate all dropdowns immediately
+  if (typeof updateTypeOptions === 'function') {
+    const mode = document.getElementById('txType') ? document.getElementById('txType').value : 'Receipt';
+    updateTypeOptions(mode);
+  }
+  if (typeof updateEditTypeOptions === 'function') {
+    const editMode = document.getElementById('edit_txType') ? document.getElementById('edit_txType').value : 'Receipt';
+    updateEditTypeOptions(editMode);
+  }
+  if (typeof populateLedgerSubtypeDropdown === 'function') {
+    populateLedgerSubtypeDropdown();
+  }
+}
+window.applyDatabaseCategories = applyDatabaseCategories;
+
+async function loadCategoriesFromApi() {
+  try {
+    const fetchFn = (typeof apiFetch === 'function') ? apiFetch : fetch;
+    const res = await fetchFn('/api/categories');
+    if (!res.ok) return;
+    const data = await res.json();
+    const list = data.categories || data.data || [];
+    if (Array.isArray(list) && list.length > 0) {
+      applyDatabaseCategories(list);
+    }
+  } catch (e) {
+    console.warn('[Categories] Could not load from /api/categories:', e.message);
+  }
+}
+window.loadCategoriesFromApi = loadCategoriesFromApi;
+
+function buildCategoryOptionsFromDatabase(mode = 'Receipt', entryType = 'Cash') {
+  let categories = (window.dbCategories && window.dbCategories.length > 0)
+    ? window.dbCategories
+    : (window.PG_CATEGORIES || (window.PG_STORE && window.PG_STORE.categories) || (typeof globalRawCategories !== 'undefined' ? globalRawCategories : []) || []);
+
+  const optionsList = [];
+
+  if (Array.isArray(categories) && categories.length > 0) {
+    const cMode = (mode === 'OpeningBalance') ? 'Receipt' : mode;
+
+    // Filter by type matching mode ('Receipt', 'Payment', or 'Both')
+    const filtered = categories.filter(c => {
+      const cType = c.type || 'Both';
+      return (cType === 'Both' || cType === cMode);
+    });
+
+    filtered.forEach(cat => {
+      const name = (cat.name || '').trim();
+      let grp = (cat.group_name || '').trim();
+      if (!name) return;
+
+      // Handle generic None / General
+      if (name === '-- None / General --' || name === 'None / General' || grp === 'General') {
+        return;
+      }
+
+      // If entryType is Cash, skip purely Bank-internal types
+      if (entryType === 'Cash' && grp === 'Bank') {
+        return;
+      }
+
+      // Contra handling for Cash
+      if (name.toLowerCase().includes('(contra)') || grp === 'Contra') {
+        if (mode === 'Receipt' && !name.toLowerCase().includes('withdrawal')) return;
+        if (mode === 'Payment' && !name.toLowerCase().includes('deposit')) return;
+      }
+
+      // Auto-assign group_name if missing
+      if (!grp) {
+        if (name === 'Subscription') grp = 'Subscription';
+        else if (name === 'Offering') grp = 'Offering';
+        else if (name.toLowerCase().includes('contra')) grp = 'Contra';
+        else if (name.toLowerCase().includes('charity')) grp = 'Charity';
+        else if (cat.type === 'Receipt') grp = 'Other Income';
+        else grp = 'Ledger';
+      }
+
+      let val = '';
+      let text = name;
+
+      if (grp === 'Subscription') {
+        val = 'Subscription|';
+      } else if (grp === 'Offering') {
+        val = 'Offering|';
+      } else if (grp === 'Charity') {
+        if (!name.toLowerCase().startsWith('charity')) {
+          text = 'Charity ' + name;
+        }
+        val = `Charity|${text}`;
+      } else if (grp === 'Standalone' || grp === name || !['Ledger', 'Other Income', 'Monthly Meeting', 'Contra'].includes(grp)) {
+        val = `${name}|`;
+      } else {
+        val = `${grp}|${name}`;
+      }
+
+      if (!optionsList.some(o => o.val === val)) {
+        optionsList.push({
+          val: val,
+          text: text,
+          group: grp,
+          id: cat.id
+        });
+      }
+    });
+  }
+
+  // Fallback if categories table was not populated yet
+  if (optionsList.length === 0 && typeof globalFieldRules !== 'undefined') {
+    const typesList = Object.keys(globalFieldRules);
+    typesList.forEach(type => {
+      const rules = globalFieldRules[type];
+      if (typeof isTabApplicableToCurrentFY === 'function' && !isTabApplicableToCurrentFY(rules)) return;
+      if (!rules || !rules.mode) {
+        if (mode === 'Receipt' && !['Subscription', 'Offering', 'Charity', 'Other Income'].includes(type)) return;
+        if (mode === 'Payment' && !['Ledger', 'Charity'].includes(type)) return;
+      } else if (rules.mode !== 'Both' && rules.mode !== mode) {
+        return;
+      }
+
+      let subtypes = (typeof subTypesConfig !== 'undefined' && subTypesConfig[type]) ? subTypesConfig[type] : [];
+      if (type === 'Charity') {
+        subtypes = (mode === 'Receipt') ? [{ name: 'Charity Received', mode: 'Receipt' }] : [{ name: 'Charity Paid', mode: 'Payment' }];
+      }
+
+      if (subtypes.length > 0) {
+        subtypes.forEach(opt => {
+          let stName = (typeof opt === 'string') ? opt : opt.name;
+          const stMode = (typeof opt === 'string') ? 'Both' : (opt.mode || 'Both');
+          if (stMode === 'Both' || stMode === mode) {
+            let displayName = stName;
+            if (type === 'Charity' && !stName.toLowerCase().startsWith('charity')) {
+              displayName = "Charity " + stName;
+              stName = displayName;
+            }
+            optionsList.push({ val: `${type}|${stName}`, text: displayName, group: type });
+          }
+        });
+      } else {
+        optionsList.push({ val: `${type}|`, text: type, group: type });
+      }
+    });
+  }
+
+  // Ensure Cash Contra is available
+  if (entryType === 'Cash') {
+    if (mode === 'Receipt' && !optionsList.some(o => o.val.startsWith('Contra|'))) {
+      optionsList.push({ val: 'Contra|Cash Withdrawal (Contra)', text: 'Cash Withdrawal (Contra)', group: 'Contra' });
+    } else if (mode === 'Payment' && !optionsList.some(o => o.val.startsWith('Contra|'))) {
+      optionsList.push({ val: 'Contra|Cash Deposit (Contra)', text: 'Cash Deposit (Contra)', group: 'Contra' });
+    }
+  }
+
+  // Append None / General option
+  if (!optionsList.some(o => o.val === '|')) {
+    optionsList.push({ val: '|', text: '-- None / General --', group: 'General' });
+  }
+
+  return optionsList;
+}
+window.buildCategoryOptionsFromDatabase = buildCategoryOptionsFromDatabase;
+
+function populateCategorySelect(selectElement, mode, entryType, targetVal) {
+  if (!selectElement) return;
+  const currentVal = (targetVal !== undefined && targetVal !== null && targetVal !== '') ? targetVal : selectElement.value;
+  selectElement.innerHTML = '';
+
+  const optionsList = buildCategoryOptionsFromDatabase(mode, entryType);
+
+  // Group by category group for clean, intuitive UI
+  const groups = {};
+  optionsList.forEach(opt => {
+    const grp = opt.group || 'Other';
+    if (!groups[grp]) groups[grp] = [];
+    groups[grp].push(opt);
+  });
+
+  const preferredGroupOrder = (mode === 'Payment')
+    ? ['Ledger', 'Monthly Meeting', 'Charity', 'Contra', 'General']
+    : ['Subscription', 'Offering', 'Other Income', 'Monthly Meeting', 'Charity', 'Contra', 'General'];
+
+  const groupKeys = Object.keys(groups).sort((a, b) => {
+    const idxA = preferredGroupOrder.indexOf(a);
+    const idxB = preferredGroupOrder.indexOf(b);
+    if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+    if (idxA !== -1) return -1;
+    if (idxB !== -1) return 1;
+    return a.localeCompare(b);
+  });
+
+  groupKeys.forEach(grp => {
+    const grpItems = groups[grp];
+    grpItems.sort((a, b) => a.text.localeCompare(b.text));
+    if (grpItems.length === 1 && (grp === 'General' || grp === 'Subscription' || grp === 'Offering')) {
+      const optEl = document.createElement('option');
+      optEl.value = grpItems[0].val;
+      optEl.innerText = grpItems[0].text;
+      if (grpItems[0].id) optEl.dataset.categoryId = grpItems[0].id;
+      selectElement.appendChild(optEl);
+    } else {
+      const optGroup = document.createElement('optgroup');
+      optGroup.label = grp;
+      grpItems.forEach(item => {
+        const optEl = document.createElement('option');
+        optEl.value = item.val;
+        optEl.innerText = item.text;
+        if (item.id) optEl.dataset.categoryId = item.id;
+        optGroup.appendChild(optEl);
+      });
+      selectElement.appendChild(optGroup);
+    }
+  });
+
+  // Restore selection:
+  if (currentVal && optionsList.some(t => t.val === currentVal)) {
+    selectElement.value = currentVal;
+  } else if (currentVal && currentVal.includes('|') && currentVal.split('|')[1]) {
+    const subPart = currentVal.split('|')[1];
+    const matchSub = optionsList.find(t => t.val.includes('|' + subPart));
+    if (matchSub) selectElement.value = matchSub.val;
+    else if (optionsList.length > 0) selectElement.value = optionsList[0].val;
+  } else if (currentVal && optionsList.some(t => t.val.startsWith(currentVal.split('|')[0] + '|'))) {
+    const matchType = optionsList.find(t => t.val.startsWith(currentVal.split('|')[0] + '|'));
+    selectElement.value = matchType ? matchType.val : optionsList[0].val;
+  } else if (optionsList.length > 0) {
+    selectElement.value = optionsList[0].val;
+  }
+}
+window.populateCategorySelect = populateCategorySelect;
+
+// Fetch categories from DB immediately
+if (typeof window !== 'undefined') {
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => { loadCategoriesFromApi(); });
+  } else {
+    loadCategoriesFromApi();
+  }
+}
 
 let globalChurchUpiId = "";
 
@@ -2552,15 +2849,257 @@ function compareNamesIgnoringPrefix(a, b) {
   return cleanA.localeCompare(cleanB) || (a || '').localeCompare(b || '');
 }
 
+function deduplicateMembersList(rawMembers) {
+  if (!Array.isArray(rawMembers)) return [];
+
+  const validMembers = rawMembers.filter(m => m && String(m.id) !== 'NaN' && String(m.name) !== 'NaN' && String(m.name || '').trim());
+  const merged = [];
+
+  validMembers.forEach(m => {
+    const rawName = getRawName(m.name, m.title).toLowerCase().trim();
+    if (!rawName) return;
+    const addr = (m.address || '').trim();
+    const cleanAddr = (addr === '-' || addr.toLowerCase() === 'not specified' || addr.toLowerCase() === 'no address') ? '' : addr.toLowerCase();
+
+    // Check if an existing merged record corresponds to this member
+    const existing = merged.find(em => {
+      const emRawName = getRawName(em.name, em.title).toLowerCase().trim();
+      if (emRawName !== rawName) return false;
+
+      const emAddr = (em.address || '').trim();
+      const emCleanAddr = (emAddr === '-' || emAddr.toLowerCase() === 'not specified' || emAddr.toLowerCase() === 'no address') ? '' : emAddr.toLowerCase();
+
+      // If either record has no specific address, or addresses match/contain each other
+      if (!cleanAddr || !emCleanAddr) return true;
+      return cleanAddr === emCleanAddr || cleanAddr.includes(emCleanAddr) || emCleanAddr.includes(cleanAddr);
+    });
+
+    const mDocId = m._docId || m.id;
+    const mAlias = String(m.name || '').trim().toLowerCase();
+
+    if (!existing) {
+      merged.push({
+        ...m,
+        _allDocIds: mDocId ? [String(mDocId)] : [],
+        _aliases: mAlias ? [mAlias] : []
+      });
+    } else {
+      if (mDocId && !existing._allDocIds.includes(String(mDocId))) {
+        existing._allDocIds.push(String(mDocId));
+      }
+      if (mAlias && !existing._aliases.includes(mAlias)) {
+        existing._aliases.push(mAlias);
+      }
+
+      // Merge missing address
+      const emAddr = (existing.address || '').trim();
+      const emCleanAddr = (emAddr === '-' || emAddr.toLowerCase() === 'not specified' || emAddr.toLowerCase() === 'no address') ? '' : emAddr;
+      if (!emCleanAddr && addr && addr !== '-' && addr.toLowerCase() !== 'not specified' && addr.toLowerCase() !== 'no address') {
+        existing.address = addr;
+      }
+
+      // Merge missing phone
+      if ((!existing.phone || existing.phone === '-') && (m.phone && m.phone !== '-')) {
+        existing.phone = m.phone;
+      }
+
+      // Merge title
+      if (!existing.title && m.title) {
+        existing.title = m.title;
+      }
+
+      // Merge nickname
+      if (!existing.nickname && m.nickname) {
+        existing.nickname = m.nickname;
+      }
+
+      // If either has active status, keep active
+      if (m.status && m.status !== 'No') {
+        existing.status = m.status;
+      }
+    }
+  });
+
+  return merged;
+}
+
+async function cleanDuplicateMembersInFirestore(silent = false) {
+  if (!globalRawMembers || globalRawMembers.length === 0) {
+    if (!silent) showAlert("No members loaded to clean.", "info");
+    return { removedCount: 0 };
+  }
+
+  if (!silent) showGlobalLoading("Analyzing and fixing duplicate member records...");
+
+  try {
+    const rawMap = new Map();
+    globalRawMembers.forEach(m => {
+      if (!m || !m.name) return;
+      const rName = getRawName(m.name, m.title).toLowerCase().trim();
+      if (!rName) return;
+      if (!rawMap.has(rName)) rawMap.set(rName, []);
+      rawMap.get(rName).push(m);
+    });
+
+    const toDeleteIds = [];
+    const toUpdateOps = [];
+
+    rawMap.forEach((list, rName) => {
+      if (list.length <= 1) return;
+
+      const clusters = [];
+      list.forEach(m => {
+        const addr = (m.address || '').trim();
+        const cAddr = (addr === '-' || addr.toLowerCase() === 'not specified' || addr.toLowerCase() === 'no address') ? '' : addr.toLowerCase();
+
+        const matchCluster = clusters.find(cl => {
+          if (!cAddr || !cl.cleanAddress) return true;
+          return cAddr === cl.cleanAddress || cAddr.includes(cl.cleanAddress) || cl.cleanAddress.includes(cAddr);
+        });
+
+        if (!matchCluster) {
+          clusters.push({
+            cleanAddress: cAddr,
+            items: [m]
+          });
+        } else {
+          if (!matchCluster.cleanAddress && cAddr) {
+            matchCluster.cleanAddress = cAddr;
+          }
+          matchCluster.items.push(m);
+        }
+      });
+
+      clusters.forEach(cl => {
+        if (cl.items.length > 1) {
+          cl.items.sort((a, b) => {
+            const scA = (a.address ? 4 : 0) + (a.phone ? 2 : 0) + (a.title ? 1 : 0);
+            const scB = (b.address ? 4 : 0) + (b.phone ? 2 : 0) + (b.title ? 1 : 0);
+            return scB - scA;
+          });
+
+          const keeper = cl.items[0];
+          const dups = cl.items.slice(1);
+          const fieldsToUpdate = {};
+          let needsUpdate = false;
+
+          dups.forEach(d => {
+            const dAddr = (d.address || '').trim();
+            if ((!keeper.address || keeper.address === '-' || keeper.address.toLowerCase() === 'not specified') && dAddr && dAddr !== '-' && dAddr.toLowerCase() !== 'not specified') {
+              keeper.address = dAddr;
+              fieldsToUpdate.address = dAddr;
+              needsUpdate = true;
+            }
+            if ((!keeper.phone || keeper.phone === '-') && d.phone && d.phone !== '-') {
+              keeper.phone = d.phone;
+              fieldsToUpdate.phone = d.phone;
+              needsUpdate = true;
+            }
+            if (!keeper.title && d.title) {
+              keeper.title = d.title;
+              fieldsToUpdate.title = d.title;
+              needsUpdate = true;
+            }
+            if (!keeper.nickname && d.nickname) {
+              keeper.nickname = d.nickname;
+              fieldsToUpdate.nickname = d.nickname;
+              needsUpdate = true;
+            }
+
+            const docId = d._docId || d.id;
+            if (docId) {
+              toDeleteIds.push(String(docId));
+            }
+          });
+
+          const keeperDocId = keeper._docId || keeper.id;
+          if (needsUpdate && keeperDocId) {
+            toUpdateOps.push({ docId: String(keeperDocId), fields: fieldsToUpdate });
+          }
+        }
+      });
+    });
+
+    if (toDeleteIds.length > 0) {
+      console.log(`🧹 Removing ${toDeleteIds.length} duplicate member document(s) from Firestore...`);
+      const deletePromises = toDeleteIds.map(id => db.collection('members').doc(id).delete().catch(e => console.warn("Delete doc error:", e)));
+      const updatePromises = toUpdateOps.map(u => db.collection('members').doc(u.docId).update(u.fields).catch(e => console.warn("Update doc error:", e)));
+      await Promise.all([...deletePromises, ...updatePromises]);
+
+      globalRawMembers = globalRawMembers.filter(m => !toDeleteIds.includes(String(m._docId || m.id)));
+      membersDataStore = deduplicateMembersList(globalRawMembers);
+      _memberCodeCache = null;
+      renderMembersTab();
+      if (typeof renderMembersDirectoryTab === 'function') renderMembersDirectoryTab();
+
+      if (!silent) hideGlobalLoading();
+      if (!silent) {
+        showAlert(`🧹 Successfully cleaned ${toDeleteIds.length} duplicate member record(s)!`, "success");
+      }
+      return { removedCount: toDeleteIds.length };
+    } else {
+      if (!silent) hideGlobalLoading();
+      if (!silent) {
+        showAlert("✅ No duplicate member documents found. Directory is already clean!", "info");
+      }
+      return { removedCount: 0 };
+    }
+  } catch (err) {
+    if (!silent) hideGlobalLoading();
+    console.error("Error cleaning duplicate members:", err);
+    if (!silent) {
+      showAlert("⚠️ Error cleaning duplicate members: " + (err.message || err), "error");
+    }
+    return { removedCount: 0 };
+  }
+}
+
+function normalizeAddressStr(addr) {
+  if (!addr) return '';
+  const s = String(addr).toLowerCase().trim();
+  if (s === '-' || s === '--' || s === 'not specified' || s === 'no address' || s === 'null' || s === 'undefined') return '';
+  return s.replace(/[\r\n\t,.-]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function areAddressesMatching(a1, a2) {
+  const n1 = normalizeAddressStr(a1);
+  const n2 = normalizeAddressStr(a2);
+  if (!n1 || !n2) return false;
+  if (n1 === n2) return true;
+  if (n1.length >= 4 && n2.includes(n1)) return true;
+  if (n2.length >= 4 && n1.includes(n2)) return true;
+  return false;
+}
+
 function getMemberObject(mName, mAddr = '') {
   if (!mName) return { name: '', address: '' };
   const nLower = mName.toLowerCase().trim();
-  const aLower = (mAddr || '').toLowerCase().trim();
-  if (aLower) {
-    const found = membersDataStore.find(m => m.name && m.name.toLowerCase().trim() === nLower && (m.address || '').toLowerCase().trim() === aLower);
+  const rawLower = (typeof getRawName === 'function' ? getRawName(mName) : mName).toLowerCase().trim();
+  const cleanAddr = normalizeAddressStr(mAddr);
+
+  if (cleanAddr && typeof membersDataStore !== 'undefined' && Array.isArray(membersDataStore)) {
+    const found = membersDataStore.find(m => {
+      if (!m) return false;
+      const mn = (m.name || '').toLowerCase().trim();
+      const mr = (typeof getRawName === 'function' ? getRawName(mn) : mn).toLowerCase().trim();
+      const matchesName = (mn === nLower || mr === rawLower || (m._aliases && m._aliases.includes(nLower)));
+      const matchesAddr = areAddressesMatching(m.address, cleanAddr);
+      return matchesName && matchesAddr;
+    });
     if (found) return found;
   }
-  return membersDataStore.find(m => m.name && m.name.toLowerCase().trim() === nLower) || { name: mName, address: mAddr };
+
+  if (typeof membersDataStore !== 'undefined' && Array.isArray(membersDataStore)) {
+    const foundByName = membersDataStore.find(m => {
+      if (!m) return false;
+      const mn = (m.name || '').toLowerCase().trim();
+      const mr = (typeof getRawName === 'function' ? getRawName(mn) : mn).toLowerCase().trim();
+      return mn === nLower || mr === rawLower || (m._aliases && m._aliases.includes(nLower));
+    });
+    if (foundByName) return foundByName;
+  }
+
+  return { name: mName, address: mAddr };
 }
 
 function resolveMemberAddress(tx) {
@@ -2608,44 +3147,103 @@ function resolveMemberAddress(tx) {
 }
 
 function isTxMatchingMember(tx, mName, mAddr = '') {
-  if (!tx || !tx.accountName) return false;
-  const txName = tx.accountName.toLowerCase().trim();
+  if (!tx) return false;
   const targetName = (mName || '').toLowerCase().trim();
-  if (txName !== targetName) return false;
+  if (!targetName) return false;
 
-  const duplicateMembers = membersDataStore.filter(m => m.name && m.name.toLowerCase().trim() === targetName);
-  if (duplicateMembers.length <= 1) {
-    return true; // Only one member with this name — no disambiguation needed
-  }
+  const cleanTarget = (typeof getRawName === 'function' ? getRawName(targetName) : targetName).toLowerCase().trim();
+  const targetMember = getMemberObject(mName, mAddr);
 
-  // Multiple members with same name exist: must check address
-  const txAddr = (tx.address || '').toLowerCase().trim();
-  const targetAddr = (mAddr || '').toLowerCase().trim();
+  // Address Resolution
+  const rawTargetAddr = (mAddr || (targetMember ? targetMember.address : '') || '').trim();
+  const normTargetAddr = normalizeAddressStr(rawTargetAddr);
 
-  // Best case: both tx and member have address — do precise match
-  if (txAddr && targetAddr) {
-    return txAddr === targetAddr || txAddr.includes(targetAddr) || targetAddr.includes(txAddr);
-  }
+  const rawTxAddr = (tx.address || (typeof resolveMemberAddress === 'function' ? resolveMemberAddress(tx) : '') || '').trim();
+  const normTxAddr = normalizeAddressStr(rawTxAddr);
 
-  // Both unknown — can't distinguish, show for all same-name members
-  if (!txAddr && !targetAddr) {
-    return true;
-  }
-
-  if (!txAddr) {
-    // tx has no address (old entry before column J was added) — try description as a hint
-    const txDesc = (tx.description || '').toLowerCase().trim();
-    if (txDesc && targetAddr && (txDesc.includes(targetAddr) || targetAddr.includes(txDesc))) {
-      return true;
+  // =========================================================================
+  // CRITICAL STEP 1: STRICT ADDRESS CONFLICT CHECK (HIGHEST PRECEDENCE)
+  // If BOTH transaction and member have a specific address, they MUST match!
+  // NO member code, name match, or alias can EVER override an address conflict!
+  // =========================================================================
+  if (normTxAddr && normTargetAddr) {
+    if (!areAddressesMatching(normTxAddr, normTargetAddr)) {
+      return false; // Strict conflict rejection: different addresses belong to different members!
     }
-    // Cannot determine which member this belongs to.
-    // Show for ALL same-name members so no data is hidden.
-    // Accuracy improves as new entries carry address in column J.
-    return true;
   }
 
-  // tx has address but target member has none — cannot confirm match
-  return false;
+  // Also check if transaction description explicitly mentions another member's address
+  const txDesc = (tx.description || tx.particulars || '').toLowerCase().trim();
+  const normDesc = normalizeAddressStr(txDesc);
+  if (normTargetAddr && normDesc && typeof membersDataStore !== 'undefined' && Array.isArray(membersDataStore)) {
+    const otherConflict = membersDataStore.some(m => {
+      if (m === targetMember) return false;
+      const mr = (typeof getRawName === 'function' ? getRawName(m.name, m.title) : (m.name || '')).toLowerCase().trim();
+      if (mr !== cleanTarget) return false;
+      const otherNorm = normalizeAddressStr(m.address);
+      return otherNorm && otherNorm.length >= 5 && normDesc.includes(otherNorm) && !normTargetAddr.includes(otherNorm);
+    });
+    if (otherConflict) return false;
+  }
+
+  // =========================================================================
+  // STEP 2: NAME / CODE VERIFICATION
+  // =========================================================================
+  let rawTxName = (tx.accountName || tx.account_name || tx.name || '').toLowerCase().trim();
+
+  // If no accountName on bank transaction, check if description starts with or includes member name
+  if (!rawTxName && txDesc) {
+    if (txDesc.startsWith(targetName) || txDesc.includes(' - ' + targetName) || txDesc.includes(targetName + ' - ') ||
+        (cleanTarget && (txDesc.startsWith(cleanTarget) || txDesc.includes(' - ' + cleanTarget) || txDesc.includes(cleanTarget + ' - ')))) {
+      rawTxName = targetName;
+    }
+  }
+
+  const cleanRawTx = (typeof getRawName === 'function' ? getRawName(rawTxName) : rawTxName).toLowerCase().trim();
+  const isAliasMatch = targetMember && targetMember._aliases && (targetMember._aliases.includes(rawTxName) || targetMember._aliases.includes(cleanRawTx));
+  const isNameMatch = (rawTxName === targetName || (cleanRawTx && cleanRawTx === cleanTarget) || isAliasMatch);
+
+  // Check unique member code ONLY if addresses do not conflict
+  const targetCode = targetMember ? (targetMember.code || targetMember.member_code || '').toLowerCase().trim() : '';
+  const txCode = (tx.memberCode || tx.member_code || '').toLowerCase().trim();
+  const isCodeMatch = (targetCode && txCode && targetCode === txCode);
+
+  if (!isNameMatch && !isCodeMatch) {
+    return false;
+  }
+
+  // =========================================================================
+  // STEP 3: AMBIGUITY RESOLUTION FOR SAME-NAME MEMBERS
+  // =========================================================================
+  // A. If transaction has a specific address, but selected member has no address recorded:
+  if (normTxAddr && !normTargetAddr && typeof membersDataStore !== 'undefined' && Array.isArray(membersDataStore)) {
+    const otherMemberHasAddr = membersDataStore.some(m => {
+      if (m === targetMember) return false;
+      const mr = (typeof getRawName === 'function' ? getRawName(m.name, m.title) : (m.name || '')).toLowerCase().trim();
+      if (mr !== cleanTarget) return false;
+      return areAddressesMatching(m.address, normTxAddr);
+    });
+    if (otherMemberHasAddr) return false; // Belongs to that other member!
+  }
+
+  // B. If selected member has a specific address, but transaction has no explicit address:
+  if (!normTxAddr && normTargetAddr && typeof membersDataStore !== 'undefined' && Array.isArray(membersDataStore)) {
+    const otherSameNameMembers = membersDataStore.filter(m => {
+      if (m === targetMember) return false;
+      const mr = (typeof getRawName === 'function' ? getRawName(m.name, m.title) : (m.name || '')).toLowerCase().trim();
+      const otherNorm = normalizeAddressStr(m.address);
+      return mr === cleanTarget && otherNorm;
+    });
+
+    if (otherSameNameMembers.length > 0) {
+      if (normDesc && normDesc.includes(normTargetAddr)) {
+        return true;
+      }
+      return false; // Cannot attribute ambiguous tx without address to this member
+    }
+  }
+
+  return true;
 }
 
 const renderedTabs = new Set();
@@ -2667,6 +3265,7 @@ function renderTabContent(tabId) {
   } else if (tabId === 'entryTab') {
     isEditMode = false;
     originalEditVrNo = "";
+    if (typeof calculateNextVoucherNumbers === 'function') calculateNextVoucherNumbers();
     const currentMode = document.getElementById('txType') ? document.getElementById('txType').value : 'Receipt';
     setMode(currentMode);
   } else if (tabId === 'transactionsTab') {
@@ -2762,17 +3361,116 @@ function switchTab(tabId, fromHash = false) {
 }
 
 // --- LEDGER TAB ---
-function populateLedgerSubtypeDropdown() {
-  const select = document.getElementById('ledgerSubtypeFilter');
-  if (!select) return;
+function normalizeLedgerName(str) {
+  if (!str) return '';
+  return String(str).toLowerCase().replace(/[^a-z0-9]/g, '');
+}
 
-  const ledgerSubtypes = subTypesConfig["Ledger"] || [];
-  let html = '<option value="ALL" selected>-- All Ledger Accounts --</option>';
-  ledgerSubtypes.forEach(sub => {
-    const subName = (typeof sub === 'string') ? sub : sub.name;
-    html += `<option value="${subName}">${subName}</option>`;
-  });
-  select.innerHTML = html;
+function isGeneralBodyOrAnniversaryTx(tx) {
+  if (!tx) return false;
+  const t = String(tx.type || '').toLowerCase().trim();
+  const c = String(tx.category || '').toLowerCase().trim();
+  const s = String(tx.subtype || tx.subType || tx.bank_subtype || tx.bankSubtype || '').toLowerCase().trim();
+  const d = String(tx.particulars || tx.description || '').toLowerCase().trim();
+  const n = String(tx.accountName || '').toLowerCase().trim();
+
+  // If explicitly categorized or typed as Monthly Meeting, it belongs to Monthly Meeting!
+  if (t === 'monthly meeting' || c === 'monthly meeting' || s === 'monthly meeting' ||
+      t === 'monthlymeeting' || c === 'monthlymeeting' || s === 'monthlymeeting') {
+    return false;
+  }
+
+  const allText = `${t} ${c} ${s} ${d} ${n}`;
+
+  return (
+    allText.includes('general body') ||
+    allText.includes('generalbody') ||
+    allText.includes('anniversary')
+  );
+}
+
+function isMeetingTransaction(tx) {
+  if (!tx) return false;
+  const t = String(tx.type || '').toLowerCase().trim();
+  const c = String(tx.category || '').toLowerCase().trim();
+  const s = String(tx.subtype || tx.subType || tx.bank_subtype || tx.bankSubtype || '').toLowerCase().trim();
+  const d = String(tx.particulars || tx.description || '').toLowerCase().trim();
+
+  // If explicitly categorized or typed as Monthly Meeting:
+  if (t === 'monthly meeting' || c === 'monthly meeting' || s === 'monthly meeting' ||
+      t === 'monthlymeeting' || c === 'monthlymeeting' || s === 'monthlymeeting') {
+    return true;
+  }
+
+  // General Body / Anniversary Meeting Expenses must NEVER be included in Monthly Meeting!
+  if (isGeneralBodyOrAnniversaryTx(tx)) return false;
+
+  return (
+    t.includes('monthly meeting') || t.includes('monthlymeeting') ||
+    c.includes('monthly meeting') || c.includes('monthlymeeting') ||
+    s.includes('monthly meeting') || s.includes('monthlymeeting') ||
+    d.includes('monthly meeting') || d.includes('monthlymeeting')
+  );
+}
+
+function isTxForDynamicType(tx, typeName) {
+  if (!tx || !typeName) return false;
+  const target = typeName.trim().toLowerCase();
+
+  if (target === 'monthly meeting' || target === 'monthlymeeting') {
+    if (isGeneralBodyOrAnniversaryTx(tx)) return false;
+    return isMeetingTransaction(tx);
+  }
+
+  const t = String(tx.type || '').trim().toLowerCase();
+  const c = String(tx.category || '').trim().toLowerCase();
+  const s = String(tx.subtype || tx.subType || tx.bank_subtype || tx.bankSubtype || '').trim().toLowerCase();
+  return t === target || c === target || s === target;
+}
+
+function isLedgerExpenseTx(tx) {
+  if (!tx) return false;
+  const typeStr = (tx.type || tx.category || '').toLowerCase().trim();
+  const subStr = (tx.subtype || tx.subType || tx.bank_subtype || tx.bankSubtype || '').toLowerCase().trim();
+  const descStr = (tx.description || tx.particulars || '').toLowerCase().trim();
+  const modeStr = (tx.mode || '').toLowerCase().trim();
+  const catStr = (tx.category || '').toLowerCase().trim();
+
+  // Exclude Receipts
+  if (modeStr === 'receipt' || (Number(tx.receipt || 0) > 0 && Number(tx.payment || 0) === 0)) return false;
+
+  // Exclude Contra
+  if (typeStr.includes('contra') || subStr.includes('contra') || descStr.includes('cash deposit') || descStr.includes('cash withdrawal')) return false;
+
+  // Exclude Charity (handled in Charity tab)
+  if (typeStr.includes('charity') || subStr.includes('charity')) return false;
+
+  // Exclude Monthly Meeting (handled exclusively in Monthly Meeting dynamic tab)
+  // General Body / Anniversary Meeting Expenses must NEVER be excluded from Ledger!
+  if (!isGeneralBodyOrAnniversaryTx(tx)) {
+    if (
+      typeStr.includes('monthly meeting') || typeStr.includes('monthlymeeting') ||
+      catStr.includes('monthly meeting') || catStr.includes('monthlymeeting') ||
+      subStr.includes('monthly meeting') || subStr.includes('monthlymeeting') ||
+      isMeetingTransaction(tx)
+    ) return false;
+  }
+
+  // Exclude Opening Balances
+  if (typeStr.includes('opening balance') || descStr.includes('opening balance')) return false;
+
+  // Exclude internal bank transfers
+  if (typeStr === 'bank' && !subStr) return false;
+  if (subStr.includes('inter-bank transfer')) return false;
+
+  // If explicit Ledger
+  if (typeStr === 'ledger') return true;
+
+  // Any payment or debit entry is an expenditure / ledger expense
+  const amt = Number(tx.payment || tx.payments || tx.debit || tx.amount || 0);
+  if (amt > 0) return true;
+
+  return false;
 }
 
 const ledgerAccountsOrder = [
@@ -2793,43 +3491,233 @@ const ledgerAccountsOrder = [
   "Generator Expenses",
   "Church Building/Land Taxes",
   "IPC Church Registration & Membership",
-  "Kerala Water Authority for water Supply"
+  "Kerala Water Authority for water Supply",
+  "Purchases"
 ];
 
 function getLedgerSortWeight(subtypeName) {
-  const norm = (subtypeName || '').toLowerCase().trim();
+  const norm = normalizeLedgerName(subtypeName);
   for (let i = 0; i < ledgerAccountsOrder.length; i++) {
-    const item = ledgerAccountsOrder[i].toLowerCase().trim();
-    if (norm === item || norm.includes(item) || item.includes(norm)) {
+    const itemNorm = normalizeLedgerName(ledgerAccountsOrder[i]);
+    if (norm === itemNorm || norm.includes(itemNorm) || itemNorm.includes(norm)) {
       return i;
     }
   }
   return 999;
 }
 
+function getCanonicalLedgerHead(tx) {
+  if (!tx) return 'General Expense';
+
+  // General Body / Anniversary Meeting Expenses belongs to its designated ledger head
+  if (isGeneralBodyOrAnniversaryTx(tx)) {
+    return 'General Body/Anniversary Meeting Expenses';
+  }
+
+  // Exclude Monthly Meeting from ledger heads
+  if (isMeetingTransaction(tx)) {
+    return 'Monthly Meeting';
+  }
+
+  const genericWrappers = new Set([
+    'ledger', 'payment', 'receipt', 'general', 'bank', 'cash', 'expenses', 'expense', '',
+    'direct withdrawal for member', 'direct deposit for member', 'cheque issued (to cash)',
+    'direct transfer / general', 'bank transaction'
+  ]);
+
+  // 1. Primary: Category column directly from Database
+  let rawCategory = String(tx.category || '').trim();
+  if (genericWrappers.has(rawCategory.toLowerCase())) {
+    rawCategory = '';
+  }
+
+  // 2. Secondary: Subtype / Bank Subtype from Database
+  let rawSubtype = String(tx.subtype || tx.subType || tx.bank_subtype || tx.bankSubtype || '').trim();
+  if (genericWrappers.has(rawSubtype.toLowerCase())) {
+    rawSubtype = '';
+  }
+
+  // 3. Tertiary: Type column from Database (e.g. 'Monthly Meeting', 'Charity', etc.)
+  let rawType = String(tx.type || '').trim();
+  if (genericWrappers.has(rawType.toLowerCase())) {
+    rawType = '';
+  }
+
+  const explicitHead = rawCategory || rawSubtype || rawType;
+
+  // If explicit database category/subtype exists, ONLY classify based on it - NEVER look at particulars/description!
+  if (explicitHead) {
+    const norm = normalizeLedgerName(explicitHead);
+
+    for (let head of ledgerAccountsOrder) {
+      const headNorm = normalizeLedgerName(head);
+      if (norm === headNorm || norm.includes(headNorm) || headNorm.includes(norm)) {
+        return head;
+      }
+    }
+
+    // Common synonyms and variations
+    if (norm.includes('purchase')) return 'Purchases';
+    if (norm.includes('salary')) return 'Salary (Pr. T.T.Simon)';
+    if (norm.includes('allowance')) return 'Allowance (Pr. T.T.Simon)';
+    if (norm.includes('cleaning')) return 'Church Cleaning Expenses';
+    if (norm.includes('maintenance')) return 'Church Maintenance';
+    if (norm.includes('conveyance')) return 'Conveyance Expenses';
+    if (norm.includes('guest') || norm.includes('visiting')) return 'Guest/Visiting Pastors';
+    if (norm.includes('water') && (norm.includes('kerala') || norm.includes('authority'))) return 'Kerala Water Authority for water Supply';
+    if (norm.includes('water')) return 'Drinking Water';
+    if (norm.includes('parcenage') || norm.includes('parsonage')) return 'Electricity Expenses (Parcenage)';
+    if (norm.includes('electricity')) return 'Electricity Expenses (Church)';
+    if (norm.includes('generator')) return 'Generator Expenses';
+    if (norm.includes('printing') || norm.includes('stationery')) return 'Printing and Stationery';
+    if (norm.includes('supper') || norm.includes('sunday')) return "Lord's Supper/Sunday School Expenses";
+    if (norm.includes('fasting') || norm.includes('wednesday') || norm.includes('prayer')) return 'Fasting/wednesday Prayer Expenses';
+    if (norm.includes('tax') || norm.includes('land')) return 'Church Building/Land Taxes';
+    if (norm.includes('registration') || norm.includes('membership')) return 'IPC Church Registration & Membership';
+    if (norm.includes('anniversary') || norm.includes('generalbody')) return 'General Body/Anniversary Meeting Expenses';
+
+    // If it's a specific custom category head from database, use it directly
+    return explicitHead;
+  }
+
+  // 4. Last resort: only when database category/subtype is completely empty or generic
+  const descNorm = normalizeLedgerName(tx.description || tx.particulars || '');
+  const accNorm = normalizeLedgerName(tx.accountName || tx.account_name || '');
+  if (descNorm || accNorm) {
+    if (descNorm.includes('salary') || accNorm.includes('salary') || (accNorm.includes('simon') && descNorm.includes('salary'))) return 'Salary (Pr. T.T.Simon)';
+    if (descNorm.includes('allowance') || accNorm.includes('allowance') || (accNorm.includes('simon') && descNorm.includes('allowance'))) return 'Allowance (Pr. T.T.Simon)';
+    for (let head of ledgerAccountsOrder) {
+      const headNorm = normalizeLedgerName(head);
+      if (descNorm.includes(headNorm) || headNorm.includes(descNorm)) {
+        return head;
+      }
+    }
+  }
+
+  return 'General Expense';
+}
+
+function populateLedgerSubtypeDropdown(targetCategoryToSelect = null) {
+  const select = document.getElementById('ledgerSubtypeFilter');
+  if (!select) return;
+
+  const currentVal = targetCategoryToSelect || select.value || 'ALL';
+
+  const subSet = new Set();
+  (ledgerAccountsOrder || []).forEach(s => subSet.add(s));
+
+  // Collect any custom ledger heads present in configured subtypes or DB categories
+  const ledgerSubtypes = (typeof subTypesConfig !== 'undefined' && subTypesConfig["Ledger"]) ? subTypesConfig["Ledger"] : [];
+  ledgerSubtypes.forEach(sub => {
+    const subName = (typeof sub === 'string') ? sub : (sub ? sub.name : '');
+    if (subName) {
+      const canonical = getCanonicalLedgerHead({ category: subName, subtype: subName });
+      if (canonical && canonical !== 'Monthly Meeting' && canonical !== 'General Expense') {
+        subSet.add(canonical);
+      }
+    }
+  });
+
+  if (typeof window !== 'undefined' && Array.isArray(window.PG_CATEGORIES)) {
+    window.PG_CATEGORIES.forEach(cat => {
+      if (cat && cat.name && (!cat.type || cat.type.toLowerCase() === 'payment')) {
+        const grp = (cat.group_name || '').toLowerCase();
+        if (grp === 'ledger') {
+          const canonical = getCanonicalLedgerHead({ category: cat.name, subtype: cat.name });
+          if (canonical && canonical !== 'Monthly Meeting' && canonical !== 'General Expense') {
+            subSet.add(canonical);
+          }
+        }
+      }
+    });
+  }
+
+  // Also collect any valid canonical heads present in ledger pool transactions
+  const pool = (typeof getLedgerPool === 'function') ? getLedgerPool() : [];
+  pool.forEach(tx => {
+    const head = getCanonicalLedgerHead(tx);
+    if (head && head !== 'Monthly Meeting') {
+      subSet.add(head);
+    }
+  });
+
+  const excluded = new Set([
+    'monthly meeting', 'monthlymeeting', 'charity', 'offering', 'subscription',
+    'contra', 'cash deposit (contra)', 'cash withdrawal (contra)', 'suspenses'
+  ]);
+
+  let html = '<option value="ALL">-- All Ledger Accounts --</option>';
+  Array.from(subSet)
+    .filter(s => {
+      const sNorm = (s || '').toLowerCase().trim();
+      return !excluded.has(sNorm);
+    })
+    .sort((a, b) => {
+      const weightA = getLedgerSortWeight(a);
+      const weightB = getLedgerSortWeight(b);
+      if (weightA !== weightB) return weightA - weightB;
+      return a.localeCompare(b);
+    })
+    .forEach(subName => {
+      html += `<option value="${subName}">${subName}</option>`;
+    });
+  select.innerHTML = html;
+
+  if (currentVal && currentVal !== 'ALL') {
+    const targetNorm = normalizeLedgerName(currentVal);
+    let matchedIndex = -1;
+    for (let i = 0; i < select.options.length; i++) {
+      const optNorm = normalizeLedgerName(select.options[i].value);
+      if (optNorm === targetNorm || optNorm.includes(targetNorm) || targetNorm.includes(optNorm)) {
+        matchedIndex = i;
+        break;
+      }
+    }
+    if (matchedIndex !== -1) {
+      select.selectedIndex = matchedIndex;
+    } else {
+      select.value = 'ALL';
+    }
+  } else {
+    select.value = 'ALL';
+  }
+}
+
 function renderLedgerTabTable() {
   const tbody = document.getElementById('ledgerTableBody');
   if (!tbody) return;
 
-  const filterVal = document.getElementById('ledgerSubtypeFilter') ? document.getElementById('ledgerSubtypeFilter').value : 'ALL';
+  const filterSelect = document.getElementById('ledgerSubtypeFilter');
+  const filterVal = filterSelect ? filterSelect.value : 'ALL';
   const searchVal = (document.getElementById('ledgerSearchInput') ? document.getElementById('ledgerSearchInput').value : '').toLowerCase().trim();
 
+  const pool = getLedgerPool();
+  const filterNorm = (filterVal !== 'ALL') ? normalizeLedgerName(filterVal) : '';
+
   let totalAmt = 0;
-  const ledgerList = currentGeneralTxList.filter(tx => {
-    if (tx.type !== 'Ledger') return false;
+  const ledgerList = pool.filter(tx => {
+    const head = getCanonicalLedgerHead(tx);
+    const headNorm = normalizeLedgerName(head);
+    const catNorm = normalizeLedgerName(tx.category || '');
+    const subNorm = normalizeLedgerName(tx.subtype || tx.subType || tx.bank_subtype || tx.bankSubtype || '');
 
-    const matchesFilter = (filterVal === 'ALL') ||
-      (tx.subtype && tx.subtype.toLowerCase() === filterVal.toLowerCase()) ||
-      (tx.description && tx.description.toLowerCase().includes(filterVal.toLowerCase()));
-
-    if (!matchesFilter) return false;
+    if (filterVal !== 'ALL') {
+      const matches = (
+        headNorm === filterNorm || headNorm.includes(filterNorm) || filterNorm.includes(headNorm) ||
+        (catNorm && (catNorm === filterNorm || catNorm.includes(filterNorm) || filterNorm.includes(catNorm))) ||
+        (subNorm && (subNorm === filterNorm || subNorm.includes(filterNorm) || filterNorm.includes(subNorm)))
+      );
+      if (!matches) return false;
+    }
 
     if (searchVal) {
       const accName = (tx.accountName || '').toLowerCase();
-      const desc = (tx.description || '').toLowerCase();
+      const desc = (tx.description || tx.particulars || '').toLowerCase();
       const vrNo = String(tx.vrNo || '').toLowerCase();
-      const sub = (tx.subtype || '').toLowerCase();
-      if (!accName.includes(searchVal) && !desc.includes(searchVal) && !vrNo.includes(searchVal) && !sub.includes(searchVal)) {
+      const sub = (tx.subtype || tx.bank_subtype || '').toLowerCase();
+      const cat = (tx.category || '').toLowerCase();
+      const h = head.toLowerCase();
+      if (!accName.includes(searchVal) && !desc.includes(searchVal) && !vrNo.includes(searchVal) && !sub.includes(searchVal) && !h.includes(searchVal) && !cat.includes(searchVal)) {
         return false;
       }
     }
@@ -2841,9 +3729,9 @@ function renderLedgerTabTable() {
   if (ledgerList.length > 0) {
     const grouped = {};
     ledgerList.forEach(tx => {
-      const sub = (tx.subtype || '').trim() || 'General Expense';
-      if (!grouped[sub]) grouped[sub] = [];
-      grouped[sub].push(tx);
+      const head = getCanonicalLedgerHead(tx);
+      if (!grouped[head]) grouped[head] = [];
+      grouped[head].push(tx);
     });
 
     const sortedKeys = Object.keys(grouped).sort((a, b) => {
@@ -2855,7 +3743,7 @@ function renderLedgerTabTable() {
 
     sortedKeys.forEach(groupName => {
       const groupItems = sortTxDescending(grouped[groupName]);
-      const sectionTotalAmt = groupItems.reduce((sum, tx) => sum + Number(tx.payment || tx.receipt || 0), 0);
+      const sectionTotalAmt = groupItems.reduce((sum, tx) => sum + Number(tx.payment || tx.debit || tx.amount || tx.receipt || 0), 0);
       totalAmt += sectionTotalAmt;
 
       tbody.innerHTML += `
@@ -2870,28 +3758,32 @@ function renderLedgerTabTable() {
       `;
 
       groupItems.forEach(tx => {
-        const cleanDate = formatDateClean(tx.date);
         const cleanVr = formatVrNoClean(tx.vrNo);
-        const amtVal = tx.payment || tx.receipt || 0;
+        const amtVal = Number(tx.payment || tx.debit || tx.amount || tx.receipt || 0);
+        const isBank = !!(tx.isBankEntry || (tx.vrNo && String(tx.vrNo).endsWith('/B')) || tx.entryType === 'Bank');
+        const badgeLabel = tx.category || tx.subtype || tx.bank_subtype || groupName;
 
         tbody.innerHTML += `
           <tr style="border-bottom: 1px solid #f1f5f9;">
             <td style="font-weight: 500; color: #334155; white-space: nowrap;">${formatDateHtml(tx.date)}</td>
-            <td style="font-weight: 700; color: #64748b; text-align: center;">${cleanVr}</td>
-            <td style="color: #0f172a;">${tx.description || '-'}</td>
-            <td><span class="badge" style="background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; font-size: 0.72rem; font-weight: 600;">${tx.subtype || tx.description || 'Ledger'}</span></td>
+            <td style="font-weight: 700; color: #64748b; text-align: center;">
+              <span>${cleanVr}</span>
+              ${isBank ? '<span style="font-size: 0.65rem; background: #dbeafe; color: #1e40af; padding: 1px 4px; border-radius: 4px; margin-left: 4px; font-weight: 700;">BANK</span>' : ''}
+            </td>
+            <td style="color: #0f172a;">${tx.description || tx.particulars || '-'}</td>
+            <td><span class="badge" style="background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; font-size: 0.72rem; font-weight: 600;">${badgeLabel}</span></td>
             <td class="num-col pmt-val" style="font-weight: 700; color: #b91c1c; text-align: right;">${formatCurrency(amtVal)}</td>
             <td style="text-align: center; white-space: nowrap;">
               <button class="btn-action btn-table-action" style="background: #0f172a; color: #ffffff; border: none; border-radius: 6px; padding: 4px 8px;" onclick="openTransactionDetailModal('${cleanVr}')" title="View Details">👁️</button>
               <button class="btn-action btn-table-action" style="background: #2563eb; color: #ffffff; border: none; border-radius: 6px; padding: 4px 8px;" onclick="loadEntryForEdit('${cleanVr}')" title="Edit Entry">✏️</button>
-              ${(tx.receipt && tx.receipt > 0) ? `<button class="btn-action btn-table-action" style="background: #059669; color: #ffffff; border: none; border-radius: 6px; padding: 4px 8px;" onclick="openReceiptModalByVrNo('${cleanVr}')" title="Print Receipt">🧾</button>` : `<button class="btn-action btn-table-action" style="background: #dc2626; color: #ffffff; border: none; border-radius: 6px; padding: 4px 8px;" onclick="openPaymentVoucherModalByVrNo('${cleanVr}')" title="Print Voucher">🧾</button>`}
+              ${(tx.receipt && tx.receipt > 0 && !tx.payment) ? `<button class="btn-action btn-table-action" style="background: #059669; color: #ffffff; border: none; border-radius: 6px; padding: 4px 8px;" onclick="openReceiptModalByVrNo('${cleanVr}')" title="Print Receipt">🧾</button>` : `<button class="btn-action btn-table-action" style="background: #dc2626; color: #ffffff; border: none; border-radius: 6px; padding: 4px 8px;" onclick="openPaymentVoucherModalByVrNo('${cleanVr}')" title="Print Voucher">🧾</button>`}
             </td>
           </tr>
         `;
       });
     });
   } else {
-    tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: #94a3b8; padding: 20px;">No ledger account records found</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: #94a3b8; padding: 24px;">No ledger account records found matching the filter</td></tr>';
   }
 
   if (document.getElementById('ledgerTabTotalAmount')) {
@@ -2901,7 +3793,7 @@ function renderLedgerTabTable() {
     document.getElementById('ledgerTabTxCount').innerText = ledgerList.length;
   }
   if (document.getElementById('ledgerTabFilterLabel')) {
-    document.getElementById('ledgerTabFilterLabel').innerText = filterVal === 'ALL' ? 'All Accounts' : filterVal;
+    document.getElementById('ledgerTabFilterLabel').innerText = (filterVal === 'ALL') ? 'All Accounts' : filterVal;
   }
 }
 
@@ -2918,12 +3810,18 @@ function getMemberCodeMap() {
     .sort((a, b) => compareNamesIgnoringPrefix(a.name, b.name));
 
   sorted.forEach((m, idx) => {
-    const code = 'H' + String(idx + 1).padStart(2, '0');
+    const code = m.member_code || m.code || ('H' + String(idx + 1).padStart(2, '0'));
     const fullKey = ((m.name || '').trim() + '||' + (m.address || '').trim()).toLowerCase();
     map.set(fullKey, code);
     const nameKey = (m.name || '').trim().toLowerCase();
     if (!map.has(nameKey)) {
       map.set(nameKey, code);
+    }
+    if (typeof getRawName === 'function') {
+      const rawKey = getRawName(m.name).toLowerCase();
+      if (rawKey && !map.has(rawKey)) {
+        map.set(rawKey, code);
+      }
     }
   });
   _memberCodeCache = map;
@@ -2931,11 +3829,48 @@ function getMemberCodeMap() {
 }
 
 function getMemberCode(memberName, memberAddr) {
+  if (!memberName) return '-';
+  const cleanRaw = typeof getRawName === 'function' ? getRawName(memberName).toLowerCase() : memberName.toLowerCase().trim();
+  const cleanAddr = normalizeAddressStr(memberAddr);
+
+  // 1. If address is provided, find member matching BOTH name and address
+  if (cleanAddr && typeof membersDataStore !== 'undefined' && Array.isArray(membersDataStore)) {
+    const directWithAddr = membersDataStore.find(m => {
+      if (!m || !m.name) return false;
+      const mn = m.name.toLowerCase().trim();
+      const mr = typeof getRawName === 'function' ? getRawName(mn).toLowerCase() : mn;
+      const nameMatch = (mn === memberName.toLowerCase().trim() || mr === cleanRaw);
+      if (!nameMatch) return false;
+      return areAddressesMatching(m.address, cleanAddr);
+    });
+    if (directWithAddr && (directWithAddr.member_code || directWithAddr.code)) {
+      return directWithAddr.member_code || directWithAddr.code;
+    }
+  }
+
   const map = getMemberCodeMap();
-  const key = ((memberName || '').trim() + '||' + (memberAddr || '').trim()).toLowerCase();
-  if (map.has(key)) return map.get(key);
+  if (cleanAddr) {
+    const key = ((memberName || '').trim() + '||' + (memberAddr || '').trim()).toLowerCase();
+    if (map.has(key)) return map.get(key);
+  }
+
+  // 2. Fallback to direct name match if no address or not found with address
+  const directObj = (typeof membersDataStore !== 'undefined' && Array.isArray(membersDataStore))
+    ? membersDataStore.find(m => {
+        if (!m || !m.name) return false;
+        const mn = m.name.toLowerCase().trim();
+        const mr = typeof getRawName === 'function' ? getRawName(mn).toLowerCase() : mn;
+        return mn === memberName.toLowerCase().trim() || mr === cleanRaw;
+      })
+    : null;
+  if (directObj && (directObj.member_code || directObj.code)) {
+    return directObj.member_code || directObj.code;
+  }
+
   const nameKey = (memberName || '').trim().toLowerCase();
-  return map.get(nameKey) || '-';
+  if (map.has(nameKey)) return map.get(nameKey);
+  if (map.has(cleanRaw)) return map.get(cleanRaw);
+  return '-';
 }
 
 // --- MEMBER NAVIGATION & QUICK ACTION HELPERS ---
@@ -3041,12 +3976,32 @@ function filterMembersTabList() {
   const search = (document.getElementById('memberSearchInput') ? document.getElementById('memberSearchInput').value : '').toLowerCase().trim();
 
   const activeMembersSet = new Set();
-  if (typeof currentGeneralTxList !== 'undefined') {
-    currentGeneralTxList.forEach(tx => {
-      let name = (tx.accountName && tx.accountName !== '-') ? tx.accountName : (tx.name && tx.name !== '-' ? tx.name : '');
-      if (name) activeMembersSet.add(name.toLowerCase().trim());
-    });
+  const activeNameAddrSet = new Set();
+
+  function trackActiveMemberTx(tx) {
+    let name = (tx.accountName && tx.accountName !== '-') ? tx.accountName : (tx.name && tx.name !== '-' ? tx.name : '');
+    if (name) {
+      const lower = name.toLowerCase().trim();
+      activeMembersSet.add(lower);
+      const raw = typeof getRawName === 'function' ? getRawName(lower).toLowerCase().trim() : lower;
+      if (raw) activeMembersSet.add(raw);
+
+      const rawAddr = (tx.address || (typeof resolveMemberAddress === 'function' ? resolveMemberAddress(tx) : '') || '').toLowerCase().trim();
+      const normAddr = normalizeAddressStr(rawAddr);
+      if (normAddr) {
+        activeNameAddrSet.add(lower + '||' + normAddr);
+        if (raw) activeNameAddrSet.add(raw + '||' + normAddr);
+      }
+    }
   }
+
+  if (typeof currentGeneralTxList !== 'undefined') {
+    currentGeneralTxList.forEach(trackActiveMemberTx);
+  }
+  const bankList = (typeof loadedBankBookTransactions !== 'undefined' && loadedBankBookTransactions.length > 0)
+    ? loadedBankBookTransactions
+    : (typeof allTimeBankBookList !== 'undefined' ? allTimeBankBookList : []);
+  bankList.forEach(trackActiveMemberTx);
 
   // Pre-calculate name frequencies in O(N) to avoid O(N^2) inner array filtering
   const nameFreqMap = {};
@@ -3054,6 +4009,10 @@ function filterMembersTabList() {
     if (dm.name) {
       const k = dm.name.toLowerCase().trim();
       nameFreqMap[k] = (nameFreqMap[k] || 0) + 1;
+      const rawK = typeof getRawName === 'function' ? getRawName(k).toLowerCase().trim() : k;
+      if (rawK && rawK !== k) {
+        nameFreqMap[rawK] = (nameFreqMap[rawK] || 0) + 1;
+      }
     }
   });
 
@@ -3073,20 +4032,29 @@ function filterMembersTabList() {
   if (filtered.length > 0) {
     const cards = filtered.map(m => {
       const mNameLower = (m.name || '').toLowerCase().trim();
+      const rawMName = typeof getRawName === 'function' ? getRawName(m.name, m.title).toLowerCase().trim() : mNameLower;
       const mAddrLower = (m.address || '').toLowerCase().trim();
+      const normMAddr = normalizeAddressStr(m.address);
 
-      const hasDuplicates = (nameFreqMap[mNameLower] || 0) > 1;
+      const hasDuplicates = (nameFreqMap[mNameLower] || 0) > 1 || (nameFreqMap[rawMName] || 0) > 1;
 
       let isSel = false;
-      if (selNameLower && mNameLower === selNameLower) {
+      if (selNameLower && (mNameLower === selNameLower || rawMName === getRawName(selNameLower).toLowerCase().trim())) {
         if (hasDuplicates) {
-          isSel = (mAddrLower === selAddrLower);
+          isSel = areAddressesMatching(m.address, selectedMemberAddress);
         } else {
           isSel = true;
         }
       }
 
-      const hasTx = activeMembersSet.has(mNameLower);
+      let hasTx = false;
+      if (hasDuplicates && normMAddr) {
+        hasTx = activeNameAddrSet.has(mNameLower + '||' + normMAddr) ||
+                activeNameAddrSet.has(rawMName + '||' + normMAddr) ||
+                Array.from(activeNameAddrSet).some(k => (k.startsWith(mNameLower + '||') || k.startsWith(rawMName + '||')) && areAddressesMatching(k.split('||')[1], normMAddr));
+      } else {
+        hasTx = activeMembersSet.has(mNameLower) || activeMembersSet.has(rawMName);
+      }
       const displayName = formatMemberDisplayName(m.name, m.title, true, m.nickname);
       const rawName = getRawName(m.name, m.title);
       const normTitle = normalizeTitle(m.title) || 'Br.';
@@ -3137,7 +4105,71 @@ function filterMembersTabList() {
 }
 
 function getMemberGroupedTransactions(mName, mAddrTarget = '') {
-  const mTxList = currentGeneralTxList.filter(tx => isTxMatchingMember(tx, mName, mAddrTarget));
+  const bankList = (typeof loadedBankBookTransactions !== 'undefined' && loadedBankBookTransactions.length > 0)
+    ? loadedBankBookTransactions
+    : (typeof allTimeBankBookList !== 'undefined' ? filterListByFY(allTimeBankBookList) : []);
+
+  const seenTxIds = new Set();
+  const seenSplitGroupIds = new Set();
+  const seenVrKeys = new Set();
+  const mTxList = [];
+
+  // 1. Process General / Cash Book & Ledger transactions
+  (currentGeneralTxList || []).forEach(tx => {
+    if (isTxMatchingMember(tx, mName, mAddrTarget)) {
+      const txId = String(tx.id || tx._docId || '').trim();
+      if (txId && seenTxIds.has(txId)) return;
+
+      const rawVr = String(tx.vrNo || '').trim();
+      const cleanVr = typeof normalizeVrLocally === 'function' ? normalizeVrLocally(rawVr) : rawVr.toLowerCase();
+      const isPmt = (tx.payment && tx.payment > 0) || (tx.mode === 'Payment');
+      const modeStr = isPmt ? 'Payment' : 'Receipt';
+
+      if (txId) seenTxIds.add(txId);
+      if (tx.splitGroupId) seenSplitGroupIds.add(String(tx.splitGroupId).trim());
+      if (cleanVr && cleanVr !== '-' && cleanVr !== '--') {
+        seenVrKeys.add(`${cleanVr}_${tx.date || ''}_${modeStr}`);
+      }
+
+      mTxList.push(tx);
+    }
+  });
+
+  // 2. Process Bank transactions (carefully avoiding duplicates from general txs)
+  (bankList || []).forEach(tx => {
+    if (isTxMatchingMember(tx, mName, mAddrTarget)) {
+      const txId = String(tx.id || tx._docId || '').trim();
+      const linkedCashId = String(tx.cashId || tx.cash_id || '').trim();
+
+      // If this transaction was already added in general transactions by ID, skip it!
+      if (txId && (seenTxIds.has(txId) || seenTxIds.has(linkedCashId))) return;
+
+      // If this bank transaction belongs to a split group already captured in general txs, skip it!
+      if (tx.splitGroupId && seenSplitGroupIds.has(String(tx.splitGroupId).trim())) return;
+
+      const rawVr = String(tx.vrNo || '').trim();
+      const cleanVr = typeof normalizeVrLocally === 'function' ? normalizeVrLocally(rawVr) : rawVr.toLowerCase();
+      const isCredit = (tx.credit > 0 || tx.receipt > 0 || (tx.mode || '').includes('Credit') || (tx.mode || '').includes('Receipt'));
+      const modeStr = isCredit ? 'Receipt' : 'Payment';
+
+      // If a general tx with this exact Vr No, date and mode is already recorded, skip mirror/contra bank duplicate!
+      if (cleanVr && cleanVr !== '-' && cleanVr !== '--') {
+        const vrKey = `${cleanVr}_${tx.date || ''}_${modeStr}`;
+        if (seenVrKeys.has(vrKey)) return;
+        seenVrKeys.add(vrKey);
+      }
+
+      if (txId) seenTxIds.add(txId);
+
+      mTxList.push({
+        ...tx,
+        receipt: Number(tx.receipt || tx.credit || 0),
+        payment: Number(tx.payment || tx.debit || 0),
+        isBankEntry: true
+      });
+    }
+  });
+
   const groupedMap = {};
   const result = [];
 
@@ -3174,7 +4206,7 @@ function getMemberGroupedTransactions(mName, mAddrTarget = '') {
       newTx.payment = pmt;
       newTx.amount = amt;
       newTx.allVrNos = rawVr ? [rawVr] : [];
-      newTx.allTxIds = [tx.id];
+      newTx.allTxIds = tx.id ? [String(tx.id)] : [];
       newTx._splitItems = [tx];
       newTx._descParts = [];
       if (dStr) {
@@ -3185,11 +4217,15 @@ function getMemberGroupedTransactions(mName, mAddrTarget = '') {
       result.push(newTx);
     } else {
       const target = groupedMap[groupingKey];
+      // CRITICAL: Avoid adding if this exact tx ID is already in target.allTxIds!
+      if (tx.id && target.allTxIds.includes(String(tx.id))) {
+        return;
+      }
       target.receipt += rcpt;
       target.payment += pmt;
       target.amount = (target.receipt || target.payment);
       if (rawVr && !target.allVrNos.includes(rawVr)) target.allVrNos.push(rawVr);
-      if (tx.id && !target.allTxIds.includes(tx.id)) target.allTxIds.push(tx.id);
+      if (tx.id) target.allTxIds.push(String(tx.id));
       target._splitItems.push(tx);
 
       if (dStr) {
@@ -3271,9 +4307,11 @@ function selectMemberLedger(mName, mAddr = '') {
       totalContrib += (tx.receipt || 0);
       const cleanVr = formatVrNoClean(tx.vrNo);
 
+      const isBankTx = tx.isBankEntry || (tx.entryType && String(tx.entryType).toLowerCase() === 'bank') || (tx.vrNo && String(tx.vrNo).endsWith('/B'));
+      const entryTypeParam = isBankTx ? 'Bank' : 'Cash';
       const printBtnHtml = isPayment
-        ? `<button class="btn-action btn-table-action" style="background: #dc2626; color: #ffffff; border: none;" onclick="openPaymentVoucherModalByVrNo('${cleanVr}')" title="Print Payment Voucher">🧾</button>`
-        : `<button class="btn-action btn-table-action" style="background: #059669; color: #ffffff; border: none;" onclick="openReceiptModalByVrNo('${cleanVr}')" title="Print Receipt">🧾</button>`;
+        ? `<button class="btn-action btn-table-action" style="background: #dc2626; color: #ffffff; border: none;" onclick="openPaymentVoucherModalByVrNo('${cleanVr}', '${tx.id}', '${entryTypeParam}')" title="Print Payment Voucher">🧾</button>`
+        : `<button class="btn-action btn-table-action" style="background: #059669; color: #ffffff; border: none;" onclick="openReceiptModalByVrNo('${cleanVr}', '${tx.id}', '${entryTypeParam}')" title="Print Receipt">🧾</button>`;
 
       let categoryName = tx.categoryDisplay || tx.subtype || tx.type || (tx.description === '[CANCELLED]' ? 'Cancelled' : 'Subscription');
 
@@ -3281,12 +4319,15 @@ function selectMemberLedger(mName, mAddr = '') {
             <tr>
               <td style="font-weight: 600; white-space: nowrap;">${formatDateHtml(tx.date)}</td>
               <td style="font-weight: 700; text-align: center;">${cleanVr}</td>
-              <td style="line-height: 1.3;">${tx.description || '-'}</td>
+              <td style="line-height: 1.3;">
+                <div>${tx.description || '-'}</div>
+                ${(tx.address && tx.address !== '-' && tx.address.toLowerCase() !== 'not specified' && tx.address.toLowerCase() !== 'no address') ? `<div style="font-size: 0.72rem; color: #0284c7; margin-top: 2px; font-weight: 600;">📍 ${tx.address}</div>` : ''}
+              </td>
               <td><span class="badge" style="background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; font-size: 0.7rem; padding: 2px 5px;">${categoryName}</span></td>
               <td class="num-col ${isPayment ? 'exp-val' : 'rcpt-val'}" style="font-weight: 700;">${formatCurrencyNoDecimals(amt)}</td>
               <td style="text-align: center; white-space: nowrap;">
-                <button class="btn-action btn-table-action" style="background: #0f172a; color: #ffffff; border: none; margin-right: 2px;" onclick="openTransactionDetailModal('${cleanVr}')" title="View Details">👁️</button>
-                <button class="btn-action btn-table-action" style="background: #2563eb; color: #ffffff; border: none; margin-right: 2px;" onclick="loadEntryForEdit('${cleanVr}')" title="Edit Entry">✏️</button>
+                <button class="btn-action btn-table-action" style="background: #0f172a; color: #ffffff; border: none; margin-right: 2px;" onclick="openTransactionDetailModal('${cleanVr}', '${tx.id}', '${entryTypeParam}')" title="View Details">👁️</button>
+                <button class="btn-action btn-table-action" style="background: #2563eb; color: #ffffff; border: none; margin-right: 2px;" onclick="loadEntryForEdit('${cleanVr}', '${tx.id}', '${entryTypeParam}')" title="Edit Entry">✏️</button>
                 ${printBtnHtml}
               </td>
             </tr>
@@ -3703,6 +4744,98 @@ function setCharityTabMode(mode) {
   renderCharityTabTable();
 }
 
+function getCharityTransactionsPool() {
+  const pool = [];
+  const seenKeys = new Set();
+
+  function addCharityTx(tx, splitIdx = -1, overrideItem = null) {
+    const rawId = tx.id || tx.vrNo || (tx.date + '_' + tx.amount);
+    const key = splitIdx >= 0 ? `${rawId}_charity_split_${splitIdx}` : `charity_tx_${rawId}`;
+    if (seenKeys.has(key)) return;
+    seenKeys.add(key);
+
+    const isRcpt = overrideItem
+      ? ((overrideItem.subtype && overrideItem.subtype.toLowerCase().includes('received')) || (!overrideItem.subtype && (Number(overrideItem.receipt || overrideItem.amt || overrideItem.amount || 0) > 0 || Number(tx.receipt || 0) > 0)))
+      : ((tx.subtype && tx.subtype.toLowerCase().includes('received')) || (!tx.subtype && Number(tx.receipt || 0) > 0));
+
+    let sub = overrideItem ? (overrideItem.subtype || (isRcpt ? 'Charity Received' : 'Charity Paid')) : (tx.subtype || (isRcpt ? 'Charity Received' : 'Charity Paid'));
+    if (sub.toLowerCase() === 'received' || sub.toLowerCase() === 'charity received') sub = 'Charity Received';
+    else if (sub.toLowerCase() === 'paid' || sub.toLowerCase() === 'charity paid') sub = 'Charity Paid';
+
+    const amt = overrideItem ? Number(overrideItem.amount || overrideItem.amt || 0) : Number(tx.receipt || tx.payment || tx.amount || 0);
+    if (amt <= 0) return;
+
+    pool.push({
+      ...tx,
+      id: splitIdx >= 0 ? `${tx.id}_charity_${splitIdx}` : tx.id,
+      amount: amt,
+      receipt: isRcpt ? amt : 0,
+      payment: !isRcpt ? amt : 0,
+      type: 'Charity',
+      subtype: sub,
+      description: overrideItem ? (overrideItem.description || overrideItem.desc || tx.description || '') : (tx.description || '')
+    });
+  }
+
+  // 1. Scan currentGeneralTxList (Cash / General transactions)
+  (currentGeneralTxList || []).forEach(tx => {
+    const typeLower = (tx.type || '').toLowerCase();
+    const subLower = (tx.subtype || '').toLowerCase();
+    const isCharity = typeLower === 'charity' || subLower.includes('charity');
+
+    const splitItems = (Array.isArray(tx.splitItems) && tx.splitItems.length > 0)
+      ? tx.splitItems
+      : ((Array.isArray(tx._splitItems) && tx._splitItems.length > 0) ? tx._splitItems : null);
+
+    if (splitItems && splitItems.length > 0) {
+      let foundSplit = false;
+      splitItems.forEach((it, idx) => {
+        const itType = (it.type || it.category || '').toLowerCase();
+        const itSub = (it.subtype || '').toLowerCase();
+        if (itType === 'charity' || itSub.includes('charity')) {
+          foundSplit = true;
+          addCharityTx(tx, idx, it);
+        }
+      });
+      if (!foundSplit && isCharity) {
+        addCharityTx(tx);
+      }
+    } else if (isCharity) {
+      addCharityTx(tx);
+    }
+  });
+
+  // 2. Scan loadedBankBookTransactions (Bank Transactions)
+  (loadedBankBookTransactions || []).forEach(tx => {
+    const typeLower = (tx.type || '').toLowerCase();
+    const subLower = (tx.subtype || '').toLowerCase();
+    const isCharity = typeLower === 'charity' || subLower.includes('charity');
+
+    const splitItems = (Array.isArray(tx.splitItems) && tx.splitItems.length > 0)
+      ? tx.splitItems
+      : ((Array.isArray(tx._splitItems) && tx._splitItems.length > 0) ? tx._splitItems : null);
+
+    if (splitItems && splitItems.length > 0) {
+      let foundSplit = false;
+      splitItems.forEach((it, idx) => {
+        const itType = (it.type || it.category || '').toLowerCase();
+        const itSub = (it.subtype || '').toLowerCase();
+        if (itType === 'charity' || itSub.includes('charity')) {
+          foundSplit = true;
+          addCharityTx(tx, idx, it);
+        }
+      });
+      if (!foundSplit && isCharity) {
+        addCharityTx(tx);
+      }
+    } else if (isCharity) {
+      addCharityTx(tx);
+    }
+  });
+
+  return pool;
+}
+
 function renderCharityTabTable() {
   const tbody = document.getElementById('charityTableBody');
   if (!tbody) return;
@@ -3710,8 +4843,8 @@ function renderCharityTabTable() {
   const searchVal = (document.getElementById('charitySearchInput') ? document.getElementById('charitySearchInput').value : '').toLowerCase().trim();
 
   let totalAmt = 0;
-  const list = currentGeneralTxList.filter(tx => {
-    if (tx.type !== 'Charity') return false;
+  const charityPool = getCharityTransactionsPool();
+  const list = charityPool.filter(tx => {
     let matchesMode = true;
     if (selectedCharityMode !== 'All') {
       if (selectedCharityMode === 'Received') {
@@ -3942,19 +5075,6 @@ function setMonthlyMeetingTabMode(mode) {
   renderMonthlyMeetingTabTable();
 }
 
-function isMeetingTransaction(tx) {
-  if (!tx) return false;
-  const typeStr = (tx.type || '').toLowerCase();
-  const subStr = (tx.subtype || '').toLowerCase();
-  const descStr = (tx.description || '').toLowerCase();
-  const nameStr = (tx.accountName || '').toLowerCase();
-
-  if (typeStr === 'monthly meeting' || typeStr.includes('meeting')) return true;
-  if (subStr.includes('meeting')) return true;
-  if (descStr.includes('monthly meeting') || descStr.includes('general body') || descStr.includes('committee meeting') || descStr.includes('anniversary meeting')) return true;
-  if (nameStr.includes('meeting')) return true;
-  return false;
-}
 
 function renderMonthlyMeetingTabTable() {
   const tbody = document.getElementById('monthlyMeetingTableBody');
@@ -4241,7 +5361,10 @@ window.addEventListener('DOMContentLoaded', () => {
   const firstDayStr = `${firstDay.getFullYear()}-${pad(firstDay.getMonth() + 1)}-01`;
   const lastDayStr = `${lastDay.getFullYear()}-${pad(lastDay.getMonth() + 1)}-${pad(lastDay.getDate())}`;
   if (document.getElementById('memStmtFrom')) document.getElementById('memStmtFrom').value = firstDayStr;
-  if (document.getElementById('memStmtTo')) document.getElementById('memStmtTo').value = lastDayStr;
+  if (window.PG_CATEGORIES && window.PG_CATEGORIES.length > 0) {
+    applyDatabaseCategories(window.PG_CATEGORIES);
+  }
+  loadCategoriesFromApi();
   initFyDropdown();
   attachAmountFormatter('amount', 'amountWordsHint', 'amountWordsText');
   attachAmountFormatter('edit_amount', 'edit_amountWordsHint', 'edit_amountWordsText');
@@ -4273,7 +5396,7 @@ function extractBaseNum(vrStr) {
 }
 
 function calculateNextVoucherNumbers() {
-  let maxReceipt = 0;
+  let maxReceipt = 6700;
   let maxPayment = 0;
 
   allTimeGeneralTxList.forEach(tx => {
@@ -4282,30 +5405,56 @@ function calculateNextVoucherNumbers() {
 
     if (tx.rcptNo) {
       const num = extractBaseNum(tx.rcptNo);
-      if (num > maxReceipt && num < 100000) maxReceipt = num;
+      if (num >= 6701 && num < 100000 && num > maxReceipt) maxReceipt = num;
       isReceiptVr = true;
     }
     if (tx.payNo) {
       const num = extractBaseNum(tx.payNo);
-      if (num > maxPayment && num < 100000) maxPayment = num;
+      if (num >= 1 && num < 6000 && num > maxPayment) maxPayment = num;
       isPaymentVr = true;
     }
 
     if (tx.vrNo && String(tx.vrNo).trim() !== '' && tx.vrNo !== '-' && tx.vrNo !== '--' && !isReceiptVr && !isPaymentVr) {
-      const num = extractBaseNum(tx.vrNo);
-      if (num > 0 && num < 100000) {
+      const vrStr = String(tx.vrNo).trim();
+      const num = extractBaseNum(vrStr);
+      if (num > 0) {
         const isPmt = tx.type === 'Ledger' || (tx.type === 'Charity' && tx.mode === 'Payment') || tx.mode === 'Payment' || (!tx.mode && !tx.type && (Number(tx.payment) > 0 || Number(tx.payments) > 0));
         if (isPmt) {
-          if (num > maxPayment) maxPayment = num;
+          if (num >= 1 && num < 6000 && num > maxPayment) maxPayment = num;
         } else {
-          if (num > maxReceipt) maxReceipt = num;
+          if (num >= 6701 && num < 100000 && num > maxReceipt) maxReceipt = num;
         }
       }
     }
   });
 
-  nextReceiptVrNo = maxReceipt > 0 ? maxReceipt + 1 : 1;
-  nextPaymentVrNo = maxPayment > 0 ? maxPayment + 1 : 1;
+  if (typeof allTimeBankBookList !== 'undefined' && Array.isArray(allTimeBankBookList)) {
+    allTimeBankBookList.forEach(tx => {
+      if (!tx.vrNo) return;
+      const vrStr = String(tx.vrNo).trim();
+      const num = extractBaseNum(vrStr);
+      if (num <= 0) return;
+      const isPmt = tx.mode === 'Debit (Payment)' || tx.mode === 'Payment' || (Number(tx.debit || tx.payment || 0) > 0);
+      if (isPmt) {
+        if (num >= 1 && num < 6000 && num > maxPayment) maxPayment = num;
+      } else {
+        if (num >= 6701 && num < 100000 && num > maxReceipt) maxReceipt = num;
+      }
+    });
+  }
+
+  // Incorporate synced server numbers from PostgreSQL / Firestore bridge if available
+  if (typeof window !== 'undefined') {
+    if (window.PG_NEXT_RECEIPT && Number(window.PG_NEXT_RECEIPT) > maxReceipt) {
+      maxReceipt = Number(window.PG_NEXT_RECEIPT) - 1;
+    }
+    if (window.PG_NEXT_PAYMENT && Number(window.PG_NEXT_PAYMENT) > maxPayment) {
+      maxPayment = Number(window.PG_NEXT_PAYMENT) - 1;
+    }
+  }
+
+  nextReceiptVrNo = (maxReceipt >= 6700) ? (maxReceipt + 1) : 6701;
+  nextPaymentVrNo = (maxPayment >= 1) ? (maxPayment + 1) : 1;
 }
 
 function populateBankDropdowns() {
@@ -4345,6 +5494,12 @@ function populateBankDropdowns() {
 }
 
 function populateTypeDropdowns() {
+  if (window.PG_CATEGORIES && Array.isArray(window.PG_CATEGORIES) && window.PG_CATEGORIES.length > 0) {
+    applyDatabaseCategories(window.PG_CATEGORIES);
+  } else if (globalRawCategories && globalRawCategories.length > 0) {
+    applyDatabaseCategories(globalRawCategories);
+  }
+
   const mode = document.getElementById('txType') ? document.getElementById('txType').value : 'Receipt';
   if (typeof updateTypeOptions === 'function') updateTypeOptions(mode);
 
@@ -4437,12 +5592,21 @@ function processAndRenderAll() {
   allTimeGeneralTxList.forEach(tx => {
     if (tx.bankAccount && !tx.account) tx.account = tx.bankAccount;
     if (tx.payments !== undefined && tx.payment === undefined) tx.payment = tx.payments;
+    if (!tx.description && tx.particulars) tx.description = tx.particulars;
+    if (!tx.particulars && tx.description) tx.particulars = tx.description;
 
     const desc = (tx.description || '').toLowerCase();
-    const isContra = desc.includes('cash deposit') || desc.includes('cash withdrawal');
+    const bsub = (tx.bankSubtype || '').toLowerCase();
+    const isContra = desc.includes('cash deposit') || desc.includes('cash withdrawal') || bsub.includes('cash deposit') || bsub.includes('cash withdrawal');
+    const entryType = (tx.entryType || 'Cash').toLowerCase();
+    const isBank = entryType === 'bank' || String(tx.vrNo || '').toLowerCase().endsWith('/b');
+
     if (isContra) {
       tx.inCashBook = true;
       tx.addToCashBook = true;
+    } else if (isBank) {
+      tx.inCashBook = (tx.inCashBook === true || tx.addToCashBook === true);
+      tx.addToCashBook = tx.inCashBook;
     } else {
       if (tx.addToCashBook !== undefined && tx.inCashBook === undefined) {
         tx.inCashBook = tx.addToCashBook;
@@ -4461,9 +5625,11 @@ function processAndRenderAll() {
     const type = (tx.type || '').toLowerCase();
     const isInterBank = bsub.includes('inter-bank') || bsub.includes('inter transfer') || desc.includes('inter-bank') || desc.includes('inter transfer') || type.includes('inter-bank');
     if (isInterBank) return false;
+    const isContra = desc.includes('cash deposit') || desc.includes('cash withdrawal') || bsub.includes('cash deposit') || bsub.includes('cash withdrawal');
     const entryType = (tx.entryType || 'Cash').toLowerCase();
-    if (entryType === 'bank' && !tx.addToCashBook && !tx.inCashBook) return false;
-    return tx.addToCashBook || tx.inCashBook || entryType === 'cash';
+    const isBank = entryType === 'bank' || String(tx.vrNo || '').toLowerCase().endsWith('/b');
+    if (isBank && !isContra && tx.addToCashBook !== true && tx.inCashBook !== true) return false;
+    return isContra || tx.addToCashBook === true || tx.inCashBook === true || (!isBank && entryType === 'cash');
   });
 
   allTimeBankBookList = (globalRawBankTransactions || []).filter(Boolean);
@@ -4478,6 +5644,8 @@ function processAndRenderAll() {
       if (gtx.isCheque && !tx.isCheque) tx.isCheque = gtx.isCheque;
     }
     if (tx.payments !== undefined && tx.payment === undefined) tx.payment = tx.payments;
+    if (!tx.description && tx.particulars) tx.description = tx.particulars;
+    if (!tx.particulars && tx.description) tx.particulars = tx.description;
     const desc = (tx.description || '').toLowerCase();
     const bsub = (tx.bankSubtype || '').toLowerCase();
     const isContra = desc.includes('cash deposit') || desc.includes('cash withdrawal') ||
@@ -4523,8 +5691,7 @@ function processAndRenderAll() {
     if (allTimeTxList.some(t => (t.bankId && t.bankId == tx.id) || (t.bank_id && t.bank_id == tx.id))) return false;
     return tx.inCashBook && tx.addToCashBook && !(tx.transactionId && String(tx.transactionId).trim() !== '');
   });
-  // Avoid duplicates: check ID, Voucher Number, and Date + Amount + Contra description
-  const generalIds = new Set(allTimeTxList.map(tx => String(tx.id)));
+  // Avoid duplicates: check linked ID, Voucher Number, Date + Amount, or already merged contra
   const generalVrs = new Set(allTimeTxList.map(tx => normalizeVrLocally(tx.vrNo)).filter(v => v && v !== '-' && v !== '--'));
 
   bankContraForCash.forEach(tx => {
@@ -4549,7 +5716,9 @@ function processAndRenderAll() {
       return tType === 'contra' || tSub.includes('contra') || tDesc.includes('cash deposit') || tDesc.includes('cash withdrawal');
     });
 
-    if (!generalIds.has(String(tx.id)) && !hasMatchingVr && !hasMatchingContra) {
+    const isAlreadyMerged = allTimeTxList.some(t => t._bankContra && t._bankContraId === tx.id);
+
+    if (!hasMatchingVr && !hasMatchingContra && !isAlreadyMerged) {
       // Create a cash-side representation for the Cash Book:
       // Cash Deposit (Contra) → cash goes OUT of cash box → Payment side in Cash Book
       // Cash Withdrawal (Contra) → cash comes INTO cash box → Receipt side in Cash Book
@@ -4557,7 +5726,9 @@ function processAndRenderAll() {
       const bsub = (tx.bankSubtype || '').toLowerCase();
       const isCashDeposit = desc.includes('cash deposit') || bsub.includes('cash deposit');
       allTimeTxList.push(Object.assign({}, tx, {
+        id: `BC_${tx.id}`,
         _bankContra: true,
+        _bankContraId: tx.id,
         receipt: isCashDeposit ? "" : txAmt,
         payment: isCashDeposit ? txAmt : "",
         payments: isCashDeposit ? txAmt : "",
@@ -4565,17 +5736,29 @@ function processAndRenderAll() {
       }));
     }
   });
-  allTimeTxList.sort((a, b) => a.id - b.id);
+  allTimeTxList.sort((a, b) => new Date(a.date) - new Date(b.date) || (Number(a.id) || 0) - (Number(b.id) || 0));
 
 
-  membersDataStore = (globalRawMembers || []).filter(m => m && String(m.id) !== 'NaN' && String(m.name) !== 'NaN');
+  membersDataStore = deduplicateMembersList(globalRawMembers || []);
   membersDataStore.sort((a, b) => compareNamesIgnoringPrefix(a.name, b.name));
+  _memberCodeCache = null;
   activeMembersMap = {};
   membersDataStore.forEach(m => {
-    activeMembersMap[m.name.toLowerCase()] = m.address;
+    const n = (m.name || '').toLowerCase().trim();
+    const r = getRawName(m.name, m.title).toLowerCase().trim();
+    const addr = m.address || '';
+    if (n) activeMembersMap[n] = addr;
+    if (r) activeMembersMap[r] = addr;
+    if (m._aliases && Array.isArray(m._aliases)) {
+      m._aliases.forEach(al => {
+        if (al) activeMembersMap[al] = addr;
+      });
+    }
   });
 
-  if (globalRawSubtypes) {
+  if (globalRawCategories && globalRawCategories.length > 0) {
+    applyDatabaseCategories(globalRawCategories);
+  } else if (globalRawSubtypes) {
     subTypesConfig = globalRawSubtypes;
   }
   Object.keys(subTypesConfig).forEach(key => {
@@ -4709,6 +5892,12 @@ function fetchInitialDataFromFirebase() {
     subscribeToCollection(db.collection("settings").doc("subtypes"), "subtypes",
       doc => doc.exists ? doc.data() : null,
       data => globalRawSubtypes = data),
+    subscribeToCollection(db.collection("categories"), "categories",
+      snap => snap.docs.map(doc => ({ ...doc.data(), _docId: doc.id })),
+      data => {
+        globalRawCategories = data;
+        applyDatabaseCategories(data);
+      }),
     subscribeToCollection(db.collection("settings").doc("subscriptions_sheet"), "subscriptions_sheet",
       doc => doc.exists ? doc.data() : null,
       data => globalRawSubscriptionsSheet = data),
@@ -4720,7 +5909,7 @@ function fetchInitialDataFromFirebase() {
           const c = Number(d.cash ?? d.cash_amount ?? 0);
           const s = Number(d.sbi ?? d.sbiCurrent ?? d.sbi_current_amount ?? 0);
           const f = Number(d.fd ?? d.sbiFd ?? d.sbi_fd_amount ?? 0);
-          m[doc.id] = {
+          const obj = {
             ...d,
             cash: c,
             sbi: s,
@@ -4731,6 +5920,11 @@ function fetchInitialDataFromFirebase() {
             sbi_current_amount: s,
             sbi_fd_amount: f
           };
+          m[doc.id] = obj;
+          if (d.financial_year) m[d.financial_year] = obj;
+          if (d.financialYear) m[d.financialYear] = obj;
+          if (!m["2026-2027"]) m["2026-2027"] = obj;
+          if (!m["default"]) m["default"] = obj;
         });
         return m;
       },
@@ -4738,6 +5932,9 @@ function fetchInitialDataFromFirebase() {
         globalRawOpening = data || {};
         window.openingBalancesStore = window.openingBalancesStore || {};
         Object.assign(window.openingBalancesStore, globalRawOpening);
+        if (typeof renderDashboard === 'function') {
+          renderDashboard();
+        }
         if (typeof renderRecentTransactions === 'function' && currentLoadedTxList) {
           renderRecentTransactions();
         }
@@ -4747,7 +5944,12 @@ function fetchInitialDataFromFirebase() {
       }),
     subscribeToCollection(db.collection("bank_transactions"), "bank_transactions",
       snap => snap.docs.map(doc => ({ ...doc.data(), _docId: doc.id })),
-      data => globalRawBankTransactions = data),
+      data => {
+        globalRawBankTransactions = data;
+        if (typeof renderDashboard === 'function' && document.getElementById('dashCashInHand')) {
+          renderDashboard();
+        }
+      }),
     subscribeToCollection(db.collection("settings").doc("bank_accounts"), "bank_accounts",
       doc => doc.exists ? doc.data().accounts : null,
       data => globalRawBankAccounts = data),
@@ -5091,6 +6293,57 @@ function initAutoBackupScheduler() {
   }, 60000);
 }
 
+function getLedgerPoolForLists(generalList, bankList) {
+  const pool = [];
+  const seenKeys = new Set();
+  const seenVouchers = new Set();
+
+  (generalList || []).forEach(tx => {
+    if (!isLedgerExpenseTx(tx)) return;
+    const entryType = (tx.entryType || '').toLowerCase();
+    const vrStr = String(tx.vrNo || '').trim().toLowerCase();
+    const isBank = entryType === 'bank' || vrStr.endsWith('/b');
+    if (isBank) return; // Authoritative bank entries are provided by bankList
+    const amt = Number(tx.payment || tx.payments || tx.debit || tx.amount || 0);
+    if (amt <= 0) return;
+
+    const key = tx.id ? `c_${tx.id}` : `vr_${tx.vrNo}_${tx.date}_${amt}`;
+    if (!seenKeys.has(key)) {
+      seenKeys.add(key);
+      if (vrStr) seenVouchers.add(vrStr);
+      pool.push(tx);
+    }
+  });
+
+  (bankList || []).forEach(tx => {
+    if (!isLedgerExpenseTx(tx)) return;
+    const amt = Number(tx.amount || tx.debit || tx.payment || tx.payments || 0);
+    if (amt <= 0) return;
+
+    const vrStr = String(tx.vrNo || '').trim().toLowerCase();
+
+    // Check bank transaction ID uniqueness
+    if (tx.id && seenKeys.has(`b_${tx.id}`)) return;
+    // Check if linked to an already added cash transaction
+    const linkedCashId = tx.cashId || tx.cash_id;
+    if (linkedCashId && seenKeys.has(`c_${linkedCashId}`)) return;
+    // Check if duplicate identical voucher
+    if (vrStr && seenVouchers.has(vrStr)) return;
+
+    const key = tx.id ? `b_${tx.id}` : `bvr_${tx.vrNo}_${tx.date}_${amt}`;
+    if (!seenKeys.has(key)) {
+      seenKeys.add(key);
+      if (vrStr) seenVouchers.add(vrStr);
+      pool.push({
+        ...tx,
+        isBankEntry: true
+      });
+    }
+  });
+
+  return pool;
+}
+
 function buildDynamicStatementItems(generalList, bankList, suspenseList) {
   const targetIncome = [
     "Opening Balance Cash in Hand",
@@ -5103,8 +6356,8 @@ function buildDynamicStatementItems(generalList, bankList, suspenseList) {
     "First Fruits",
     "Sodari Samajam for Deposit",
     "Anniversary Expenses Received",
-    "State Bank of India (Fixed Deposit)",
-    "State Bank of India (Current Account)"
+    "Monthly Meeting",
+    "Bank Interest (Income)"
   ];
   const targetExpense = [
     "General Expense",
@@ -5126,8 +6379,8 @@ function buildDynamicStatementItems(generalList, bankList, suspenseList) {
     "IPC Church Registration & Membership",
     "Kerala Water Authority for water Supply",
     "Charity Paid",
-    "State Bank of India (Fixed Deposit)",
-    "State Bank of India (Current Account)"
+    "Purchases",
+    "Monthly Meeting"
   ];
 
   const cf = calculateCarryForward();
@@ -5169,152 +6422,250 @@ function buildDynamicStatementItems(generalList, bankList, suspenseList) {
   targetIncome.forEach(k => normIncomeMap[normalize(k)] = k);
   targetExpense.forEach(k => normExpenseMap[normalize(k)] = k);
 
-  if (generalList && generalList.length > 0) {
-    generalList.forEach(tx => {
-      const typeStr = (tx.type || '').toLowerCase();
-      const subStr = (tx.subtype || tx.description || '').toLowerCase();
-      const descStr = (tx.description || '').toLowerCase();
-      const nameStr = (tx.name || tx.accountName || '').toLowerCase();
-      const entryType = (tx.entryType || '').toLowerCase();
+  function classifyCategory(tx, isReceipt) {
+    const catVal = String(tx.category || '').trim();
+    const subVal = String(tx.subtype || tx.subType || tx.bankSubtype || tx.bank_subtype || '').trim();
+    const typeVal = String(tx.type || '').trim();
+    const descStr = String(tx.description || tx.particulars || tx.desc || '').toLowerCase();
+    const nameStr = String(tx.name || tx.accountName || tx.account_name || '').toLowerCase();
 
-      if (entryType === 'bank') {
-        const t = (tx.type || '').toLowerCase();
-        if (!t || t === 'bank' || t === 'contra') return;
-      }
+    const vrVal = String(tx.vrNo || tx.vr_no || tx.voucher_no || '').trim();
+    const explicitFields = `${catVal} ${subVal} ${typeVal} ${vrVal}`.toLowerCase();
+    const subLower = subVal.toLowerCase();
+    const typeLower = typeVal.toLowerCase();
+    const catLower = catVal.toLowerCase();
 
-      const isOpening = typeStr.includes('opening balance') || descStr.includes('opening balance') || nameStr.includes('opening balance');
-      if (isOpening) return;
-      const isContra = (descStr.includes('contra') || subStr.includes('contra') || descStr.includes('cash deposit') || descStr.includes('cash withdrawal'));
-      if (isContra) return; // Contra entries are fully handled by the Bank Book, ignore them here to prevent duplicates!
+    // 0. Primary Category / Subtype Bank Interest matches (explicitly fetching from category)
+    if (catLower === 'bank interest (income)' || catLower === 'bank interest' || catLower.includes('bank interest') ||
+        subLower === 'bank interest (income)' || subLower === 'bank interest' || subLower.includes('bank interest')) {
+      return 'Bank Interest (Income)';
+    }
+    if (catLower.includes('sodari') || catLower.includes('sodhari') || subLower.includes('sodari') || subLower.includes('sodhari')) {
+      return 'Sodari Samajam for Deposit';
+    }
 
-      const isCharityPaid = (typeStr.includes('charity') && subStr.includes('paid')) || typeStr.includes('charity paid');
-      const isCharityReceived = (typeStr.includes('charity') && subStr.includes('received')) || typeStr.includes('charity received');
-      const isReceipt = isCharityReceived ? true : (isCharityPaid ? false : ((tx.receipt && tx.receipt > 0) || (tx.mode === 'Receipt')));
-      const isPayment = isCharityPaid ? true : (isCharityReceived ? false : ((tx.payment && tx.payment > 0) || (tx.mode === 'Payment')));
-      const amt = Number(tx.amount || tx.receipt || tx.payment || 0);
+    // 1. Primary Database Type matches
+    if (typeLower === 'monthly meeting' || isMeetingTransaction(tx)) {
+      return 'Monthly Meeting';
+    }
+    // Offering / Offertory: check type, accountName, and category
+    if (typeLower === 'offering' || typeLower === 'offertory' || nameStr.includes('offertory') || nameStr.includes('offering')) {
+      return 'Offertory';
+    }
+    if (typeLower === 'subscription' || explicitFields.includes('subscription')) {
+      return 'Subscription';
+    }
+    if (explicitFields.includes('offering') || explicitFields.includes('offertory')) {
+      return 'Offertory';
+    }
+    if (typeLower === 'charity' || explicitFields.includes('charity')) {
+      if (subLower.includes('received')) return 'Charity Received';
+      if (subLower.includes('paid')) return 'Charity Paid';
+      return isReceipt ? 'Charity Received' : 'Charity Paid';
+    }
+    if (isGeneralBodyOrAnniversaryTx(tx)) {
+      return isReceipt ? 'Anniversary Expenses Received' : 'General Body/Anniversary Meeting Expenses';
+    }
 
-      if (amt <= 0) return;
+    // 2. Specific Subtype checks
+    if (subLower.includes('guest') || subLower.includes('visiting')) return 'Guest/Visiting Pastors';
+    if (subLower.includes('fasting') || subLower.includes('wednesday')) return 'Fasting/wednesday Prayer Expenses';
+    if (subLower.includes('supper') || subLower.includes('sunday')) return "Lord's Supper/Sunday School Expenses";
+    if (subLower.includes('salary')) return 'Salary (Pr. T.T.Simon)';
+    if (subLower.includes('allowance')) return 'Allowance (Pr. T.T.Simon)';
+    if (subLower.includes('maintenance')) return 'Church Maintenance';
+    if (subLower.includes('printing') || subLower.includes('stationery')) return 'Printing and Stationery';
+    if (subLower.includes('purchase')) return 'Purchases';
+    if (subLower.includes('cleaning')) return 'Church Cleaning Expenses';
+    if (subLower.includes('drinking water') || (subLower.includes('water') && !subLower.includes('kerala') && !subLower.includes('authority'))) return 'Drinking Water';
+    if (subLower.includes('kerala') || subLower.includes('authority')) return 'Kerala Water Authority for water Supply';
+    if (subLower.includes('electricity')) {
+      return (subLower.includes('parcenage') || subLower.includes('parsonage'))
+        ? 'Electricity Expenses (Parcenage)'
+        : 'Electricity Expenses (Church)';
+    }
+    if (subLower.includes('conveyance')) return 'Conveyance Expenses';
+    if (subLower.includes('generator')) return 'Generator Expenses';
+    if (subLower.includes('tax') || subLower.includes('building') || subLower.includes('land')) return 'Church Building/Land Taxes';
+    if (subLower.includes('registration') || subLower.includes('membership')) return 'IPC Church Registration & Membership';
+    if (subLower.includes('general body') || subLower.includes('anniversary')) {
+      return isReceipt ? 'Anniversary Expenses Received' : 'General Body/Anniversary Meeting Expenses';
+    }
+    if (subLower.includes('sodari') || subLower.includes('sodhari')) return 'Sodari Samajam for Deposit';
+    if (subLower.includes('donation')) return 'Donations';
+    if (subLower.includes('first fruit') || subLower.includes('firstfruit')) return 'First Fruits';
+    if (subLower.includes('general expense') || subLower.includes('general expenses')) return 'General Expense';
+    
+    const isSubInterest = subLower.includes('interest') || /\bint(\.|\b|\d)/i.test(subLower) || vrVal.toLowerCase().startsWith('int') || vrVal.toLowerCase().includes('int1') || vrVal.toLowerCase().includes('int2');
+    if (isSubInterest) return (subLower.includes('sodari') || descStr.includes('sodari')) ? 'Sodari Samajam for Deposit' : 'Bank Interest (Income)';
 
-      let matchStr = tx.subtype || tx.type;
+    // 3. Fallback checks on combined text only when subtype is generic or empty
+    const allText = `${explicitFields} ${descStr} ${nameStr}`.toLowerCase();
+    if (allText.includes('salary')) return 'Salary (Pr. T.T.Simon)';
+    if (allText.includes('allowance')) return 'Allowance (Pr. T.T.Simon)';
+    if (allText.includes('purchase')) return 'Purchases';
+    if (allText.includes('sodari') || allText.includes('sodhari')) return 'Sodari Samajam for Deposit';
+    if (allText.includes('charity')) return isReceipt ? 'Charity Received' : 'Charity Paid';
+    if (allText.includes('subscription')) return 'Subscription';
+    if (allText.includes('offering') || allText.includes('offertory')) return 'Offertory';
+    if (allText.includes('donation')) return 'Donations';
+    if (allText.includes('first fruit') || allText.includes('firstfruit')) return 'First Fruits';
+    if (allText.includes('maintenance')) return 'Church Maintenance';
+    if (allText.includes('cleaning')) return 'Church Cleaning Expenses';
+    if (allText.includes('drinking water') || (allText.includes('water') && !allText.includes('kerala') && !allText.includes('authority'))) return 'Drinking Water';
+    if (allText.includes('kerala') || allText.includes('authority')) return 'Kerala Water Authority for water Supply';
+    if (allText.includes('electricity')) {
+      return (allText.includes('parcenage') || allText.includes('parsonage'))
+        ? 'Electricity Expenses (Parcenage)'
+        : 'Electricity Expenses (Church)';
+    }
+    if (allText.includes('printing') || allText.includes('stationery')) return 'Printing and Stationery';
+    if (allText.includes('supper') || allText.includes('sunday')) return "Lord's Supper/Sunday School Expenses";
+    if (allText.includes('fasting') || allText.includes('wednesday')) return 'Fasting/wednesday Prayer Expenses';
+    if (allText.includes('conveyance')) return 'Conveyance Expenses';
+    if (allText.includes('guest') || allText.includes('visiting')) return 'Guest/Visiting Pastors';
+    if (allText.includes('generator')) return 'Generator Expenses';
+    if (allText.includes('tax') || allText.includes('building') || allText.includes('land')) return 'Church Building/Land Taxes';
+    if (allText.includes('registration') || allText.includes('membership')) return 'IPC Church Registration & Membership';
+    if (allText.includes('interest') || /\bint(\.|\b|\d)/i.test(allText) || vrVal.toLowerCase().startsWith('int') || vrVal.toLowerCase().includes('int1') || vrVal.toLowerCase().includes('int2')) {
+      return (allText.includes('sodari') || allText.includes('sodhari')) ? 'Sodari Samajam for Deposit' : 'Bank Interest (Income)';
+    }
+    if (allText.includes('general expense') || allText.includes('general expenses')) return 'General Expense';
 
-      if (!matchStr && (descStr.includes('anniversary') || nameStr.includes('anniversary'))) {
-        matchStr = 'Anniversary Expenses Received';
-      }
+    const genericWrappers = new Set(['ledger', 'payment', 'receipt', 'general', 'bank', 'cash', 'expenses', 'expense', 'other income', 'general expense', 'general expenses', '-', '']);
+    if (subVal && !genericWrappers.has(subVal.toLowerCase())) {
+      const nSub = normalize(subVal);
+      if (isReceipt && normIncomeMap[nSub]) return normIncomeMap[nSub];
+      if (!isReceipt && normExpenseMap[nSub]) return normExpenseMap[nSub];
+      return toTitleCase(subVal);
+    }
+    if (catVal && !genericWrappers.has(catVal.toLowerCase())) {
+      const nCat = normalize(catVal);
+      if (isReceipt && normIncomeMap[nCat]) return normIncomeMap[nCat];
+      if (!isReceipt && normExpenseMap[nCat]) return normExpenseMap[nCat];
+      return toTitleCase(catVal);
+    }
 
-      const matchStrLower = (matchStr || '').toLowerCase();
-      if (matchStrLower === 'receipt' ||
-        matchStrLower === 'payment' ||
-        matchStrLower === '-' ||
-        matchStrLower.includes('cheque') ||
-        matchStrLower.includes('transfer') ||
-        matchStrLower.includes('ssfsvs') ||
-        matchStrLower === '') {
-        matchStr = '';
-      }
-
-      if (isOpening) {
-        if (descStr.includes('fixed deposit') || nameStr.includes('fixed deposit')) {
-          matchStr = 'Opening Balance SBI Fixed Deposit';
-        } else if (descStr.includes('state bank') || nameStr.includes('state bank') || descStr.includes('sbi') || nameStr.includes('sbi') || descStr.includes('current')) {
-          matchStr = 'Opening Balance SBI Current A/c';
-        } else {
-          matchStr = 'Opening Balance Cash in Hand';
-        }
-      } else if (typeStr === 'charity') {
-        matchStr = isReceipt ? 'Charity Received' : 'Charity Paid';
-      } else if (typeStr.includes('subscription')) {
-        if (nameStr === 'unknown') {
-          matchStr = 'Other Subscriptions (Unknown)'; // separate bucket so it doesn't inflate the main one
-        } else {
-          matchStr = 'Subscription';
-        }
-      } else if (typeStr === 'offering' || typeStr.includes('offer')) {
-        matchStr = 'Offertory';
-      }
-
-      let nStr = normalize(matchStr);
-      // Custom fallbacks based on common mistakes
-      if (nStr.includes('generalexpense')) nStr = normalize('General Expense');
-      if (nStr.includes('salary') && nStr.includes('simon')) nStr = normalize('Salary (Pr. T.T.Simon)');
-      if (nStr.includes('allowance') && nStr.includes('simon')) nStr = normalize('Allowance (Pr. T.T.Simon)');
-      if (nStr.includes('generalbody') || nStr.includes('anniversarymeeting')) nStr = normalize('General Body/Anniversary Meeting Expenses');
-      if (nStr.includes('maintenance')) nStr = normalize('Church Maintenance');
-      if (nStr.includes('supper') || nStr.includes('sundayschool')) nStr = normalize("Lord's Supper/Sunday School Expenses");
-      if (nStr.includes('cleaning')) nStr = normalize('Church Cleaning Expenses');
-      if (nStr.includes('offering') || nStr.includes('offertory')) nStr = normalize('Offertory');
-      if (nStr.includes('sodari')) nStr = normalize('Sodari Samajam for Deposit');
-      if (nStr.includes('anniversary') && isReceipt) nStr = normalize('Anniversary Expenses Received');
-      if (nStr.includes('charity') && isReceipt) nStr = normalize('Charity Received');
-      if (nStr.includes('charity') && isPayment) nStr = normalize('Charity Paid');
-      if (nStr.includes('electricity') && nStr.includes('parcenage')) nStr = normalize('Electricity Expenses (Parcenage)');
-      else if (nStr.includes('electricity')) nStr = normalize('Electricity Expenses (Church)');
-      if (nStr.includes('water') && nStr.includes('drinking')) nStr = normalize('Drinking Water');
-      else if (nStr.includes('water') && (nStr.includes('kerala') || nStr.includes('authority') || nStr.includes('supply'))) nStr = normalize('Kerala Water Authority for water Supply');
-
-      if (isReceipt || isOpening) {
-        calcTotalIncome += amt;
-        let actualName = 'Other Income';
-        if (isOpening) {
-          if (normIncomeMap[nStr]) {
-            actualName = normIncomeMap[nStr];
-          } else {
-            actualName = 'Opening Balance Cash in Hand';
-          }
-        } else if (normIncomeMap[nStr]) {
-          actualName = normIncomeMap[nStr];
-        } else {
-          actualName = (!matchStr || matchStr.trim() === '') ? 'General / Unclassified' : toTitleCase(matchStr);
-        }
-
-        incomeMap[actualName] = (incomeMap[actualName] || 0) + amt;
-        // capture cash deposit/withdrawal flows if identified
-        if (nStr && (nStr.indexOf('cashdeposit') !== -1 || (matchStr || '').toLowerCase().indexOf('cash deposit') !== -1)) {
-          depositMap[actualName] = (depositMap[actualName] || 0) + amt;
-        }
-        if (nStr && (nStr.indexOf('cashwithdrawal') !== -1 || (matchStr || '').toLowerCase().indexOf('cash withdrawal') !== -1)) {
-          withdrawalMap[actualName] = (withdrawalMap[actualName] || 0) + amt;
-        }
-
-        if (!categoryTxMap[actualName]) categoryTxMap[actualName] = [];
-        categoryTxMap[actualName].push({ date: tx.date, name: tx.accountName || tx.name || '-', desc: tx.description || '-', amount: amt });
-
-      } else if (isPayment) {
-        calcTotalExpenditure += amt;
-        let actualName = 'General Expense';
-        if (normExpenseMap[nStr]) {
-          actualName = normExpenseMap[nStr];
-        } else {
-          actualName = toTitleCase(matchStr || 'General Expense');
-        }
-
-        expenseMap[actualName] = (expenseMap[actualName] || 0) + amt;
-        if (nStr && (nStr.indexOf('cashdeposit') !== -1 || (matchStr || '').toLowerCase().indexOf('cash deposit') !== -1)) {
-          depositMap[actualName] = (depositMap[actualName] || 0) + amt;
-        }
-        if (nStr && (nStr.indexOf('cashwithdrawal') !== -1 || (matchStr || '').toLowerCase().indexOf('cash withdrawal') !== -1)) {
-          withdrawalMap[actualName] = (withdrawalMap[actualName] || 0) + amt;
-        }
-
-        if (!categoryTxMap[actualName]) categoryTxMap[actualName] = [];
-        categoryTxMap[actualName].push({ date: tx.date, name: tx.accountName || tx.name || '-', desc: tx.description || '-', amount: amt });
-      }
-    });
+    return isReceipt ? 'Other Income' : 'General Expense';
   }
 
+  // --- 1. EXPENDITURES ---
+  // A. Ledger expenditures: exactly mirrors the calculation displayed in Ledger Accounts tab
+  const ledgerPool = getLedgerPoolForLists(generalList, bankList);
+  ledgerPool.forEach(tx => {
+    const head = getCanonicalLedgerHead(tx);
+    const amt = Number(tx.payment || tx.payments || tx.debit || tx.amount || 0);
+    if (amt > 0) {
+      expenseMap[head] = (expenseMap[head] || 0) + amt;
+      if (!categoryTxMap[head]) categoryTxMap[head] = [];
+      categoryTxMap[head].push({
+        date: tx.date,
+        name: tx.accountName || tx.name || '-',
+        desc: tx.description || tx.particulars || '-',
+        amount: amt
+      });
+    }
+  });
+
+  // B. Monthly Meeting expenditures (excluded from ledger pool, tracked dynamically)
+  const seenMeetingKeys = new Set();
+  const seenMeetingVrs = new Set();
+  (generalList || []).forEach(tx => {
+    if (isMeetingTransaction(tx)) {
+      const entryType = (tx.entryType || '').toLowerCase();
+      const vrStr = String(tx.vrNo || '').trim().toLowerCase();
+      if (entryType === 'bank' || vrStr.endsWith('/b')) return;
+      const amt = Number(tx.payment || tx.payments || tx.debit || 0);
+      if (amt > 0) {
+        const k = tx.id ? `c_${tx.id}` : `vr_${tx.vrNo}_${tx.date}_${amt}`;
+        if (!seenMeetingKeys.has(k)) {
+          seenMeetingKeys.add(k);
+          if (vrStr) seenMeetingVrs.add(vrStr);
+          expenseMap['Monthly Meeting'] = (expenseMap['Monthly Meeting'] || 0) + amt;
+          if (!categoryTxMap['Monthly Meeting']) categoryTxMap['Monthly Meeting'] = [];
+          categoryTxMap['Monthly Meeting'].push({ date: tx.date, name: tx.accountName || tx.name || '-', desc: tx.description || '-', amount: amt });
+        }
+      }
+    }
+  });
+  (bankList || []).forEach(tx => {
+    if (isMeetingTransaction(tx)) {
+      if (tx.cashId && seenMeetingKeys.has(`c_${tx.cashId}`)) return;
+      if (tx.id && (seenMeetingKeys.has(`c_${tx.id}`) || seenMeetingKeys.has(`b_${tx.id}`))) return;
+      const vrStr = String(tx.vrNo || '').trim().toLowerCase();
+      const vrBase = vrStr.replace(/\/b$/i, '');
+      if (vrStr && seenMeetingVrs.has(vrStr)) return;
+      if (vrBase && seenMeetingVrs.has(vrBase)) return;
+      const amt = Number(tx.amount || tx.debit || tx.payment || tx.payments || 0);
+      if (amt > 0) {
+        const k = tx.id ? `b_${tx.id}` : `bvr_${tx.vrNo}_${tx.date}_${amt}`;
+        if (!seenMeetingKeys.has(k)) {
+          seenMeetingKeys.add(k);
+          if (vrStr) seenMeetingVrs.add(vrStr);
+          expenseMap['Monthly Meeting'] = (expenseMap['Monthly Meeting'] || 0) + amt;
+          if (!categoryTxMap['Monthly Meeting']) categoryTxMap['Monthly Meeting'] = [];
+          categoryTxMap['Monthly Meeting'].push({ date: tx.date, name: tx.accountName || tx.name || '-', desc: tx.description || tx.particulars || '-', amount: amt });
+        }
+      }
+    }
+  });
+
+  // C. Charity Paid (excluded from ledger pool, tracked dynamically)
+  const seenCharityKeys = new Set();
+  const seenCharityVrs = new Set();
+  (generalList || []).forEach(tx => {
+    const typeStr = (tx.type || '').toLowerCase();
+    const subStr = (tx.subtype || tx.description || '').toLowerCase();
+    const isCharityPaid = (typeStr.includes('charity') && subStr.includes('paid')) || typeStr.includes('charity paid') || (typeStr === 'charity' && Number(tx.payment || tx.payments || 0) > 0);
+    if (isCharityPaid) {
+      const entryType = (tx.entryType || '').toLowerCase();
+      const vrStr = String(tx.vrNo || '').trim().toLowerCase();
+      if (entryType === 'bank' || vrStr.endsWith('/b')) return;
+      const amt = Number(tx.payment || tx.payments || tx.amount || 0);
+      if (amt > 0) {
+        const k = tx.id ? `c_${tx.id}` : `vr_${tx.vrNo}_${tx.date}_${amt}`;
+        if (!seenCharityKeys.has(k)) {
+          seenCharityKeys.add(k);
+          if (vrStr) seenCharityVrs.add(vrStr);
+          expenseMap['Charity Paid'] = (expenseMap['Charity Paid'] || 0) + amt;
+          if (!categoryTxMap['Charity Paid']) categoryTxMap['Charity Paid'] = [];
+          categoryTxMap['Charity Paid'].push({ date: tx.date, name: tx.accountName || tx.name || '-', desc: tx.description || '-', amount: amt });
+        }
+      }
+    }
+  });
+  (bankList || []).forEach(tx => {
+    const typeStr = (tx.type || '').toLowerCase();
+    const subStr = (tx.subtype || tx.bankSubtype || tx.description || '').toLowerCase();
+    const isCharityPaid = (typeStr.includes('charity') && subStr.includes('paid')) || typeStr.includes('charity paid') || (typeStr === 'charity' && Number(tx.debit || tx.payment || tx.payments || 0) > 0);
+    if (isCharityPaid) {
+      if (tx.cashId && seenCharityKeys.has(`c_${tx.cashId}`)) return;
+      if (tx.id && (seenCharityKeys.has(`c_${tx.id}`) || seenCharityKeys.has(`b_${tx.id}`))) return;
+      const vrStr = String(tx.vrNo || '').trim().toLowerCase();
+      const vrBase = vrStr.replace(/\/b$/i, '');
+      if (vrStr && seenCharityVrs.has(vrStr)) return;
+      if (vrBase && seenCharityVrs.has(vrBase)) return;
+      const amt = Number(tx.amount || tx.debit || tx.payment || tx.payments || 0);
+      if (amt > 0) {
+        const k = tx.id ? `b_${tx.id}` : `bvr_${tx.vrNo}_${tx.date}_${amt}`;
+        if (!seenCharityKeys.has(k)) {
+          seenCharityKeys.add(k);
+          if (vrStr) seenCharityVrs.add(vrStr);
+          expenseMap['Charity Paid'] = (expenseMap['Charity Paid'] || 0) + amt;
+          if (!categoryTxMap['Charity Paid']) categoryTxMap['Charity Paid'] = [];
+          categoryTxMap['Charity Paid'].push({ date: tx.date, name: tx.accountName || tx.name || '-', desc: tx.description || tx.particulars || '-', amount: amt });
+        }
+      }
+    }
+  });
+
+  // D. Suspense Expenditures: Advance Paid
   if (suspenseList && suspenseList.length > 0) {
     suspenseList.forEach(tx => {
       const isAdvanceRcpt = tx.type === 'Advance Received';
       const amt = Number(tx.amount || 0);
       if (amt <= 0) return;
-
-      if (isAdvanceRcpt) {
-        calcTotalIncome += amt;
-        let actualName = 'Suspense (Advance Received)';
-        incomeMap[actualName] = (incomeMap[actualName] || 0) + amt;
-        if (!categoryTxMap[actualName]) categoryTxMap[actualName] = [];
-        categoryTxMap[actualName].push({ date: tx.date, name: tx.name || '-', desc: tx.description || '-', amount: amt });
-      } else {
-        calcTotalExpenditure += amt;
+      if (!isAdvanceRcpt) {
         let actualName = 'Suspense (Advance Paid)';
         expenseMap[actualName] = (expenseMap[actualName] || 0) + amt;
         if (!categoryTxMap[actualName]) categoryTxMap[actualName] = [];
@@ -5323,43 +6674,629 @@ function buildDynamicStatementItems(generalList, bankList, suspenseList) {
     });
   }
 
-  if (bankList && bankList.length > 0) {
-    bankList.forEach(tx => {
+  // --- 2. INCOME ---
+  const seenReceiptVrs = new Set();
+  const seenReceiptIds = new Set();
+
+  // A. Cash Receipts & direct entries in general list
+  if (generalList && generalList.length > 0) {
+    generalList.forEach(tx => {
+      const typeStr = (tx.type || '').toLowerCase();
+      const subStr = (tx.subtype || tx.description || '').toLowerCase();
       const descStr = (tx.description || '').toLowerCase();
-      const bankSub = (tx.bankSubtype || '').toLowerCase();
+      const nameStr = (tx.name || tx.accountName || '').toLowerCase();
+      const entryType = (tx.entryType || '').toLowerCase();
+      const vrStr = String(tx.vrNo || tx.vr_no || tx.voucher_no || '').trim().toLowerCase();
 
-      if (bankSub.includes('interest') || descStr.includes('interest')) {
-        const amt = Number(tx.amount || tx.receipt || tx.payment || 0);
-        if (amt > 0) {
-          const isReceipt = tx.receipt > 0 || (tx.mode && tx.mode.includes("Receipt"));
-          const actualName = tx.bankSubtype || tx.description || 'Bank Interest';
+      const allGenFields = `${tx.category || ''} ${tx.subtype || ''} ${tx.subType || ''} ${tx.bankSubtype || ''} ${tx.bank_subtype || ''} ${tx.type || ''} ${tx.description || ''} ${tx.particulars || ''} ${vrStr}`.toLowerCase();
+      const isCatBankInterest = (tx.category || '').toLowerCase().includes('bank interest') || (tx.bankSubtype || '').toLowerCase().includes('bank interest') || (tx.subtype || '').toLowerCase().includes('bank interest');
+      const isGenInterest = isCatBankInterest || allGenFields.includes('interest') || /\bint(\.|\b|\d)/i.test(allGenFields) || vrStr.startsWith('int') || vrStr.includes('int1') || vrStr.includes('int2');
 
-          if (isReceipt) {
-            calcTotalIncome += amt;
-            incomeMap[actualName] = (incomeMap[actualName] || 0) + amt;
-            if (!categoryTxMap[actualName]) categoryTxMap[actualName] = [];
-            categoryTxMap[actualName].push({ date: tx.date, name: tx.name || '-', desc: tx.description || '-', amount: amt });
-          } else {
-            calcTotalExpenditure += amt;
-            expenseMap[actualName] = (expenseMap[actualName] || 0) + amt;
-            if (!categoryTxMap[actualName]) categoryTxMap[actualName] = [];
-            categoryTxMap[actualName].push({ date: tx.date, name: tx.name || '-', desc: tx.description || '-', amount: amt });
+      const isOpening = typeStr.includes('opening balance') || descStr.includes('opening balance') || nameStr.includes('opening balance');
+      if (isOpening) return;
+      const isContra = (descStr.includes('contra') || subStr.includes('contra') || descStr.includes('cash deposit') || descStr.includes('cash withdrawal'));
+      if (isContra) return;
+
+      // Pure bank receipts (e.g. Bank Interest, Direct Deposits into Bank) are processed in bankList
+      if (entryType === 'bank' || vrStr.endsWith('/b') || vrStr.startsWith('int') || vrStr.includes('int1') || vrStr.includes('int2') || isCatBankInterest) {
+        if (bankList && bankList.length > 0) {
+          return;
+        }
+        // Fallback: If bankList is not available or empty, process Bank Interest here directly
+        if (isGenInterest) {
+          const amt = (Number(tx.amount) > 0 ? Number(tx.amount) : 0) || (Number(tx.receipt) > 0 ? Number(tx.receipt) : 0) || (Number(tx.credit) > 0 ? Number(tx.credit) : 0) || 0;
+          if (amt <= 0) return;
+          const isSodari = (tx.category || '').toLowerCase().includes('sodari') || allGenFields.includes('sodari') || allGenFields.includes('sodhari');
+          const cat = (isCatBankInterest && !(tx.category || '').toLowerCase().includes('sodari')) ? 'Bank Interest (Income)' : (isSodari ? 'Sodari Samajam for Deposit' : 'Bank Interest (Income)');
+          calcTotalIncome += amt;
+          incomeMap[cat] = (incomeMap[cat] || 0) + amt;
+          if (!categoryTxMap[cat]) categoryTxMap[cat] = [];
+          categoryTxMap[cat].push({ date: tx.date, name: tx.accountName || tx.name || '-', desc: tx.description || tx.particulars || '-', amount: amt });
+          if (tx.id) seenReceiptIds.add(`c_${tx.id}`);
+          if (tx.vrNo) seenReceiptVrs.add(vrStr);
+          return;
+        }
+      }
+
+      const isCharityPaid = (typeStr.includes('charity') && subStr.includes('paid')) || typeStr.includes('charity paid');
+      const isCharityReceived = (typeStr.includes('charity') && subStr.includes('received')) || typeStr.includes('charity received');
+      const isReceipt = isCharityReceived ? true : (isCharityPaid ? false : ((tx.receipt && Number(tx.receipt) > 0) || (tx.credit && Number(tx.credit) > 0) || (tx.mode && (tx.mode === 'Receipt' || tx.mode.includes('Receipt') || tx.mode.includes('Credit')))));
+
+      if (!isReceipt) return;
+      const amt = Number(tx.amount || (tx.receipt || tx.credit) || 0);
+      if (amt <= 0) return;
+
+      // Check for array-based split items on cash transaction
+      const splitItems = (Array.isArray(tx.splitItems) && tx.splitItems.length > 0)
+        ? tx.splitItems
+        : ((Array.isArray(tx._splitItems) && tx._splitItems.length > 0) ? tx._splitItems : null);
+
+      if (splitItems && splitItems.length > 0) {
+        splitItems.forEach(item => {
+          const itemAmt = Number(item.amount || item.receipt || item.amt || item.credit || 0);
+          if (itemAmt <= 0) return;
+          const itemCat = classifyCategory(item, true);
+          calcTotalIncome += itemAmt;
+          incomeMap[itemCat] = (incomeMap[itemCat] || 0) + itemAmt;
+          if (!categoryTxMap[itemCat]) categoryTxMap[itemCat] = [];
+          categoryTxMap[itemCat].push({ date: tx.date, name: tx.accountName || tx.name || '-', desc: item.description || item.desc || tx.description || '-', amount: itemAmt });
+        });
+        if (tx.id) seenReceiptIds.add(`c_${tx.id}`);
+        if (tx.vrNo) seenReceiptVrs.add(String(tx.vrNo).trim().toLowerCase());
+        return;
+      }
+
+      // Check for text-based '+' split on cash transaction
+      const descVal = (tx.description || tx.particulars || '').trim();
+      if (descVal.includes('+')) {
+        const parts = descVal.split(/\s*\+\s*/);
+        const parsedParts = [];
+        let allocatedSum = 0;
+
+        parts.forEach(part => {
+          const partTrimmed = part.trim();
+          if (!partTrimmed) return;
+          const pLower = partTrimmed.toLowerCase();
+
+          let partAmt = 0;
+          const parenMatch = partTrimmed.match(/\((?:[^0-9]*)([0-9]+(?:,[0-9]+)*(?:\.[0-9]+)?)\)/);
+          if (parenMatch) partAmt = parseFloat(parenMatch[1].replace(/,/g, ''));
+          if (!partAmt || isNaN(partAmt)) {
+            const symMatch = partTrimmed.match(/(?:rs\.?|inr|₹)\s*([0-9]+(?:,[0-9]+)*(?:\.[0-9]+)?)/i);
+            if (symMatch) partAmt = parseFloat(symMatch[1].replace(/,/g, ''));
+          }
+          if (!partAmt || isNaN(partAmt)) {
+            const slashMatch = partTrimmed.match(/([0-9]+(?:,[0-9]+)*(?:\.[0-9]+)?)\s*(?:\/-|\/rs)/i);
+            if (slashMatch) partAmt = parseFloat(slashMatch[1].replace(/,/g, ''));
+          }
+          if (!partAmt || isNaN(partAmt)) {
+            const numMatches = partTrimmed.match(/\b([0-9]{3,}(?:,[0-9]+)*(?:\.[0-9]+)?)\b/g);
+            if (numMatches && numMatches.length === 1) {
+              partAmt = parseFloat(numMatches[0].replace(/,/g, ''));
+            }
+          }
+
+          let cat = 'Other Income';
+          if (pLower.includes('subscription')) cat = 'Subscription';
+          else if (pLower.includes('offertory') || pLower.includes('offering')) cat = 'Offertory';
+          else if (pLower.includes('charity')) cat = 'Charity Received';
+          else if (pLower.includes('donation')) cat = 'Donations';
+          else if (pLower.includes('first fruit') || pLower.includes('firstfruit')) cat = 'First Fruits';
+          else if (pLower.includes('sodari') || pLower.includes('sodhari')) cat = 'Sodari Samajam for Deposit';
+          else if (pLower.includes('anniversary')) cat = 'Anniversary Expenses Received';
+          else {
+            cat = classifyCategory({ description: partTrimmed, particulars: partTrimmed, type: '' }, true);
+          }
+
+          parsedParts.push({ partTrimmed, partAmt, cat });
+          if (partAmt > 0) allocatedSum += partAmt;
+        });
+
+        if (allocatedSum > 0 && allocatedSum < amt) {
+          const missing = parsedParts.find(p => !p.partAmt || p.partAmt <= 0);
+          if (missing) {
+            missing.partAmt = amt - allocatedSum;
+            allocatedSum = amt;
           }
         }
+
+        if (allocatedSum > 0) {
+          parsedParts.forEach(p => {
+            const partAmt = p.partAmt || 0;
+            if (partAmt <= 0) return;
+            calcTotalIncome += partAmt;
+            incomeMap[p.cat] = (incomeMap[p.cat] || 0) + partAmt;
+            if (!categoryTxMap[p.cat]) categoryTxMap[p.cat] = [];
+            categoryTxMap[p.cat].push({ date: tx.date, name: tx.accountName || tx.name || '-', desc: p.partTrimmed, amount: partAmt });
+          });
+          if (tx.id) seenReceiptIds.add(`c_${tx.id}`);
+          if (tx.vrNo) seenReceiptVrs.add(String(tx.vrNo).trim().toLowerCase());
+          return;
+        }
+      }
+
+      const category = classifyCategory(tx, true);
+      calcTotalIncome += amt;
+      incomeMap[category] = (incomeMap[category] || 0) + amt;
+      if (category.toLowerCase().includes('cash deposit')) depositMap[category] = (depositMap[category] || 0) + amt;
+      if (category.toLowerCase().includes('cash withdrawal')) withdrawalMap[category] = (withdrawalMap[category] || 0) + amt;
+      if (!categoryTxMap[category]) categoryTxMap[category] = [];
+      categoryTxMap[category].push({ date: tx.date, name: tx.accountName || tx.name || '-', desc: tx.description || '-', amount: amt });
+
+      if (tx.id) seenReceiptIds.add(`c_${tx.id}`);
+      if (tx.vrNo) seenReceiptVrs.add(String(tx.vrNo).trim().toLowerCase());
+    });
+  }
+
+  // B. Bank Receipts
+  if (bankList && bankList.length > 0) {
+    bankList.forEach(tx => {
+      const typeStr = (tx.type || '').toLowerCase();
+      const subStr = (tx.subtype || tx.subType || tx.bank_subtype || tx.bankSubtype || '').toLowerCase();
+      const descStr = (tx.description || tx.particulars || '').toLowerCase();
+      const nameStr = (tx.name || tx.accountName || tx.account_name || '').toLowerCase();
+      const bsub = (tx.bankSubtype || tx.bank_subtype || '').toLowerCase();
+      const catStr = (tx.category || '').toLowerCase();
+      const vrStr = String(tx.vrNo || tx.vr_no || tx.voucher_no || '').trim().toLowerCase();
+
+      // Skip Opening Balances
+      const isOpening = typeStr.includes('opening balance') || descStr.includes('opening balance') || nameStr.includes('opening balance');
+      if (isOpening) return;
+
+      // Skip Contra entries (Cash Deposit / Cash Withdrawal)
+      const isContra = descStr.includes('contra') || subStr.includes('contra') || bsub.includes('contra') ||
+                       descStr.includes('cash deposit') || subStr.includes('cash deposit') || bsub.includes('cash deposit') ||
+                       descStr.includes('cash withdrawal') || subStr.includes('cash withdrawal') || bsub.includes('cash withdrawal');
+      if (isContra) return;
+
+      // Skip Inter-bank transfers between church accounts
+      const isInterBank = bsub.includes('inter-bank') || bsub.includes('inter transfer') || descStr.includes('inter-bank') || descStr.includes('inter transfer') || typeStr.includes('inter-bank');
+      if (isInterBank) return;
+
+      // Skip if already present/linked in generalList to prevent double counting
+      const linkedCashId = tx.cashId || tx.cash_id;
+      if (linkedCashId && seenReceiptIds.has(`c_${linkedCashId}`)) return;
+      if (tx.id && seenReceiptIds.has(`b_${tx.id}`)) return;
+      if (vrStr && vrStr.endsWith('/b') && seenReceiptVrs.has(vrStr)) return;
+
+      const catLower = (tx.category || '').toLowerCase().trim();
+      const bsubLower = (tx.bankSubtype || tx.bank_subtype || tx.subtype || tx.subType || '').toLowerCase().trim();
+      const allText = `${descStr} ${subStr} ${bsub} ${catStr} ${typeStr} ${vrStr} ${nameStr} ${tx.particulars || ''} ${tx.description || ''} ${tx.mode || ''}`.toLowerCase();
+
+      // Check category and bankSubtype directly for Bank Interest (Income)
+      const isExplicitBankInterest = catLower === 'bank interest (income)' || catLower === 'bank interest' || catLower.includes('bank interest') ||
+                                     bsubLower === 'bank interest (income)' || bsubLower === 'bank interest' || bsubLower.includes('bank interest');
+      const isExplicitSodari = catLower.includes('sodari') || catLower.includes('sodhari') || bsubLower.includes('sodari') || bsubLower.includes('sodhari');
+
+      const isOtherExplicitCategory = catLower.includes('subscription') || catLower.includes('offertory') || catLower.includes('offering') ||
+                                      catLower.includes('donation') || catLower.includes('charity') || catLower.includes('first fruit') ||
+                                      catLower.includes('meeting') || catLower.includes('anniversary');
+
+      const isFallbackInterest = !isOtherExplicitCategory && (
+                                   allText.includes('interest') ||
+                                   /\bint(\.|\b|\d)/i.test(allText) ||
+                                   vrStr.startsWith('int') ||
+                                   vrStr.includes('int1') ||
+                                   vrStr.includes('int2')
+                                 );
+
+      const isInterest = isExplicitBankInterest || isExplicitSodari || isFallbackInterest;
+
+      const isReceipt = isInterest || (Number(tx.credit || 0) > 0) || (Number(tx.receipt || 0) > 0) || (tx.mode && (tx.mode.includes("Receipt") || tx.mode.includes("Credit") || tx.mode.includes("Deposit") || tx.mode.includes("Interest")));
+      if (!isReceipt) return;
+
+      const amt = (Number(tx.credit) > 0 ? Number(tx.credit) : 0) ||
+                  (Number(tx.amount) > 0 ? Number(tx.amount) : 0) ||
+                  (Number(tx.receipt) > 0 ? Number(tx.receipt) : 0) ||
+                  (parseFloat(tx.credit) || parseFloat(tx.amount) || parseFloat(tx.receipt) || 0);
+      if (amt <= 0) return;
+
+      // Bank Interest specifically for Sodari Samajam FD
+      const isSodari = isExplicitSodari || (!isExplicitBankInterest && (allText.includes('sodari') || allText.includes('sodhari')));
+      if (isInterest && isSodari && !isExplicitBankInterest) {
+        calcTotalIncome += amt;
+        incomeMap['Sodari Samajam for Deposit'] = (incomeMap['Sodari Samajam for Deposit'] || 0) + amt;
+        if (!categoryTxMap['Sodari Samajam for Deposit']) categoryTxMap['Sodari Samajam for Deposit'] = [];
+        categoryTxMap['Sodari Samajam for Deposit'].push({ date: tx.date, name: tx.accountName || tx.name || '-', desc: tx.description || tx.particulars || '-', amount: amt });
+        if (tx.id) seenReceiptIds.add(`b_${tx.id}`);
+        return;
+      }
+
+      // Bank Interest (Income)
+      if (isExplicitBankInterest || (isInterest && !isOtherExplicitCategory)) {
+        calcTotalIncome += amt;
+        incomeMap['Bank Interest (Income)'] = (incomeMap['Bank Interest (Income)'] || 0) + amt;
+        if (!categoryTxMap['Bank Interest (Income)']) categoryTxMap['Bank Interest (Income)'] = [];
+        categoryTxMap['Bank Interest (Income)'].push({ date: tx.date, name: tx.accountName || tx.name || '-', desc: tx.description || tx.particulars || '-', amount: amt });
+        if (tx.id) seenReceiptIds.add(`b_${tx.id}`);
+        return;
+      }
+
+      // 1. Array-based split items on Bank Transaction (tx.splitItems / tx._splitItems)
+      const splitItems = (Array.isArray(tx.splitItems) && tx.splitItems.length > 0)
+        ? tx.splitItems
+        : ((Array.isArray(tx._splitItems) && tx._splitItems.length > 0) ? tx._splitItems : null);
+
+      if (splitItems && splitItems.length > 0) {
+        splitItems.forEach(item => {
+          const itemAmt = Number(item.amount || item.credit || item.receipt || item.amt || 0);
+          if (itemAmt <= 0) return;
+          const itemCat = classifyCategory(item, true);
+          calcTotalIncome += itemAmt;
+          incomeMap[itemCat] = (incomeMap[itemCat] || 0) + itemAmt;
+          if (!categoryTxMap[itemCat]) categoryTxMap[itemCat] = [];
+          categoryTxMap[itemCat].push({ date: tx.date, name: tx.accountName || tx.name || '-', desc: item.description || item.desc || tx.particulars || tx.description || '-', amount: itemAmt });
+        });
+        if (tx.id) seenReceiptIds.add(`b_${tx.id}`);
+        return;
+      }
+
+      // 2. Text-based '+' split entries in particulars / description (e.g., "Subscription (2000) + Offertory (1000)")
+      const fullText = (tx.particulars || tx.description || '').trim();
+      let itemsText = fullText;
+      if (fullText.includes(' - ')) {
+        const dashIdx = fullText.indexOf(' - ');
+        const cand = fullText.substring(0, dashIdx).trim().toLowerCase();
+        if (!cand.includes('contra') && !cand.includes('transfer') && !cand.includes('cash deposit') && !cand.includes('opening balance')) {
+          itemsText = fullText.substring(dashIdx + 3).trim();
+        }
+      }
+
+      if (itemsText.includes('+')) {
+        const parts = itemsText.split(/\s*\+\s*/);
+        const parsedParts = [];
+        let allocatedSum = 0;
+
+        parts.forEach(part => {
+          const partTrimmed = part.trim();
+          if (!partTrimmed) return;
+          const pLower = partTrimmed.toLowerCase();
+
+          let partAmt = 0;
+          const parenMatch = partTrimmed.match(/\((?:[^0-9]*)([0-9]+(?:,[0-9]+)*(?:\.[0-9]+)?)\)/);
+          if (parenMatch) partAmt = parseFloat(parenMatch[1].replace(/,/g, ''));
+          if (!partAmt || isNaN(partAmt)) {
+            const symMatch = partTrimmed.match(/(?:rs\.?|inr|₹)\s*([0-9]+(?:,[0-9]+)*(?:\.[0-9]+)?)/i);
+            if (symMatch) partAmt = parseFloat(symMatch[1].replace(/,/g, ''));
+          }
+          if (!partAmt || isNaN(partAmt)) {
+            const slashMatch = partTrimmed.match(/([0-9]+(?:,[0-9]+)*(?:\.[0-9]+)?)\s*(?:\/-|\/rs)/i);
+            if (slashMatch) partAmt = parseFloat(slashMatch[1].replace(/,/g, ''));
+          }
+          if (!partAmt || isNaN(partAmt)) {
+            const numMatches = partTrimmed.match(/\b([0-9]{3,}(?:,[0-9]+)*(?:\.[0-9]+)?)\b/g);
+            if (numMatches && numMatches.length === 1) {
+              partAmt = parseFloat(numMatches[0].replace(/,/g, ''));
+            }
+          }
+
+          let cat = 'Other Income';
+          if (pLower.includes('subscription')) cat = 'Subscription';
+          else if (pLower.includes('offertory') || pLower.includes('offering')) cat = 'Offertory';
+          else if (pLower.includes('charity')) cat = 'Charity Received';
+          else if (pLower.includes('donation')) cat = 'Donations';
+          else if (pLower.includes('first fruit') || pLower.includes('firstfruit')) cat = 'First Fruits';
+          else if (pLower.includes('sodari') || pLower.includes('sodhari')) cat = 'Sodari Samajam for Deposit';
+          else if (pLower.includes('anniversary')) cat = 'Anniversary Expenses Received';
+          else {
+            cat = classifyCategory({ description: partTrimmed, particulars: partTrimmed, type: '' }, true);
+          }
+
+          parsedParts.push({ partTrimmed, partAmt, cat });
+          if (partAmt > 0) allocatedSum += partAmt;
+        });
+
+        if (allocatedSum > 0 && allocatedSum < amt) {
+          const missing = parsedParts.find(p => !p.partAmt || p.partAmt <= 0);
+          if (missing) {
+            missing.partAmt = amt - allocatedSum;
+            allocatedSum = amt;
+          }
+        }
+
+        if (allocatedSum > 0) {
+          parsedParts.forEach(p => {
+            const partAmt = p.partAmt || 0;
+            if (partAmt <= 0) return;
+            calcTotalIncome += partAmt;
+            incomeMap[p.cat] = (incomeMap[p.cat] || 0) + partAmt;
+            if (!categoryTxMap[p.cat]) categoryTxMap[p.cat] = [];
+            categoryTxMap[p.cat].push({ date: tx.date, name: tx.accountName || tx.name || '-', desc: p.partTrimmed, amount: partAmt });
+          });
+          if (tx.id) seenReceiptIds.add(`b_${tx.id}`);
+          return;
+        }
+      }
+
+      // 3. Fallback direct deposit regex check (e.g. Subscription + Charity Received without '+')
+      const allTxFields = `${tx.category || ''} ${subStr} ${typeStr} ${descStr} ${nameStr} ${bsub}`.toLowerCase();
+      if (allTxFields.includes('direct deposit') || (allTxFields.includes('subscription') && allTxFields.includes('charity'))) {
+        const subMatches = [...descStr.matchAll(/subscription[^\d]*(\d[\d,]*)/gi)];
+        const chMatch = descStr.match(/charity[^\d]*(\d[\d,]*)/i);
+        let sAmt = 0;
+        subMatches.forEach(m => {
+          sAmt += parseFloat(m[1].replace(/,/g, ''));
+        });
+        const cAmt = chMatch ? parseFloat(chMatch[1].replace(/,/g, '')) : 0;
+        if (sAmt > 0 || cAmt > 0) {
+          calcTotalIncome += amt;
+          if (sAmt > 0) {
+            incomeMap['Subscription'] = (incomeMap['Subscription'] || 0) + sAmt;
+            if (!categoryTxMap['Subscription']) categoryTxMap['Subscription'] = [];
+            categoryTxMap['Subscription'].push({ date: tx.date, name: tx.accountName || tx.name || '-', desc: tx.description || tx.particulars || '-', amount: sAmt });
+          }
+          if (cAmt > 0) {
+            incomeMap['Charity Received'] = (incomeMap['Charity Received'] || 0) + cAmt;
+            if (!categoryTxMap['Charity Received']) categoryTxMap['Charity Received'] = [];
+            categoryTxMap['Charity Received'].push({ date: tx.date, name: tx.accountName || tx.name || '-', desc: tx.description || tx.particulars || '-', amount: cAmt });
+          }
+          if (tx.id) seenReceiptIds.add(`b_${tx.id}`);
+          return;
+        }
+      }
+
+      // 4. Standard single bank transaction
+      const category = classifyCategory(tx, true);
+      calcTotalIncome += amt;
+      incomeMap[category] = (incomeMap[category] || 0) + amt;
+      if (!categoryTxMap[category]) categoryTxMap[category] = [];
+      categoryTxMap[category].push({ date: tx.date, name: tx.accountName || tx.name || '-', desc: tx.description || tx.particulars || '-', amount: amt });
+      if (tx.id) seenReceiptIds.add(`b_${tx.id}`);
+    });
+  }
+
+  // C. Suspense Income: Advance Received
+  if (suspenseList && suspenseList.length > 0) {
+    suspenseList.forEach(tx => {
+      const isAdvanceRcpt = tx.type === 'Advance Received';
+      const amt = Number(tx.amount || 0);
+      if (amt <= 0) return;
+      if (isAdvanceRcpt) {
+        calcTotalIncome += amt;
+        let actualName = 'Suspense (Advance Received)';
+        incomeMap[actualName] = (incomeMap[actualName] || 0) + amt;
+        if (!categoryTxMap[actualName]) categoryTxMap[actualName] = [];
+        categoryTxMap[actualName].push({ date: tx.date, name: tx.name || '-', desc: tx.description || '-', amount: amt });
       }
     });
   }
 
-  // Filter out zero-amount items but preserve Opening Balances
-  const incItems = Object.keys(incomeMap)
-    .map(k => ({ name: k, amount: incomeMap[k], deposit: depositMap[k] || 0, withdrawal: withdrawalMap[k] || 0 }))
-    .filter(item => item.amount !== 0 || item.name.includes("Opening Balance"));
+  // --- 3. ASSEMBLE STATEMENT ITEMS PURELY DYNAMICALLY (NO FALLBACK DATA) ---
+  const incItems = targetIncome.map(k => {
+    const amt = incomeMap[k] !== undefined ? incomeMap[k] : 0;
+    return { name: k, amount: amt, deposit: depositMap[k] || 0, withdrawal: withdrawalMap[k] || 0 };
+  });
 
-  const expItems = Object.keys(expenseMap)
-    .map(k => ({ name: k, amount: expenseMap[k], deposit: depositMap[k] || 0, withdrawal: withdrawalMap[k] || 0 }))
-    .filter(item => item.amount !== 0);
+  Object.keys(incomeMap).forEach(k => {
+    if (!targetIncome.includes(k) && incomeMap[k] !== 0 && !k.toLowerCase().includes('direct deposit')) {
+      incItems.push({ name: k, amount: incomeMap[k], deposit: depositMap[k] || 0, withdrawal: withdrawalMap[k] || 0 });
+    }
+  });
+
+  const expItems = targetExpense.map(k => {
+    const amt = expenseMap[k] !== undefined ? expenseMap[k] : 0;
+    return { name: k, amount: amt, deposit: depositMap[k] || 0, withdrawal: withdrawalMap[k] || 0 };
+  });
+
+  Object.keys(expenseMap).forEach(k => {
+    if (!targetExpense.includes(k) && expenseMap[k] !== 0) {
+      expItems.push({ name: k, amount: expenseMap[k], deposit: depositMap[k] || 0, withdrawal: withdrawalMap[k] || 0 });
+    }
+  });
+
+  // Calculate dynamic totals directly from the statement items
+  calcTotalIncome = incItems.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
+  calcTotalExpenditure = expItems.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
 
   return { incItems, expItems, calcTotalIncome, calcTotalExpenditure, categoryTxMap };
+}
+
+function showDrilldownNotice(name, tabTitle) {
+  let el = document.getElementById('dashDrillNotice');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'dashDrillNotice';
+    el.style.cssText = `
+      position: fixed;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #0f172a;
+      color: #ffffff;
+      padding: 10px 22px;
+      border-radius: 30px;
+      font-size: 0.88rem;
+      font-weight: 600;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.4);
+      z-index: 99999;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      pointer-events: none;
+      transition: opacity 0.25s ease, transform 0.25s ease;
+      opacity: 0;
+    `;
+    document.body.appendChild(el);
+  }
+  el.innerHTML = `<span>🔎</span> <span>Showing breakdown for <b>${name}</b> in <u>${tabTitle}</u></span>`;
+  el.style.opacity = '1';
+  el.style.transform = 'translateX(-50%) translateY(0)';
+  clearTimeout(el._timer);
+  el._timer = setTimeout(() => {
+    el.style.opacity = '0';
+    el.style.transform = 'translateX(-50%) translateY(-10px)';
+  }, 2600);
+}
+
+function drilldownFromDashboard(rawCategoryOrName, side) {
+  if (!rawCategoryOrName) return;
+  const name = String(rawCategoryOrName).trim();
+  const lower = name.toLowerCase();
+
+  // 1. Subscriptions
+  if (lower.includes('subscription')) {
+    switchTab('subscriptionsTab');
+    if (typeof renderSubscriptionsReport === 'function') renderSubscriptionsReport();
+    showDrilldownNotice(name, 'Subscriptions Register');
+    return;
+  }
+
+  // 2. Offertory / Offering
+  if (lower.includes('offertory') || lower.includes('offering')) {
+    switchTab('offeringTab');
+    if (typeof renderOfferingTabTable === 'function') renderOfferingTabTable();
+    showDrilldownNotice(name, 'Offering Log');
+    return;
+  }
+
+  // 3. Charity (Received or Paid)
+  if (lower.includes('charity')) {
+    switchTab('charityTab');
+    if (lower.includes('received')) {
+      if (typeof setCharityTabMode === 'function') setCharityTabMode('Received');
+      else { selectedCharityMode = 'Received'; renderCharityTabTable(); }
+    } else if (lower.includes('paid')) {
+      if (typeof setCharityTabMode === 'function') setCharityTabMode('Paid');
+      else { selectedCharityMode = 'Paid'; renderCharityTabTable(); }
+    } else {
+      if (typeof setCharityTabMode === 'function') setCharityTabMode('All');
+      else { selectedCharityMode = 'All'; renderCharityTabTable(); }
+    }
+    showDrilldownNotice(name, 'Charity & Relief Register');
+    return;
+  }
+
+  // 4. Other Income items: Donations, First Fruits, Sodari Samajam, Anniversary, etc.
+  if (lower.includes('donation') || lower.includes('first fruit') || lower.includes('sodari') || lower.includes('sodhari') || lower.includes('anniversary') || lower.includes('other income')) {
+    switchTab('otherIncomeTab');
+    if (lower.includes('donation')) {
+      if (typeof setOtherIncomeTabMode === 'function') setOtherIncomeTabMode('Donation');
+      else { selectedOtherIncomeMode = 'Donation'; renderOtherIncomeTabTable(); }
+    } else if (lower.includes('first fruit')) {
+      if (typeof setOtherIncomeTabMode === 'function') setOtherIncomeTabMode('First Fruit');
+      else { selectedOtherIncomeMode = 'First Fruit'; renderOtherIncomeTabTable(); }
+    } else if (lower.includes('sodari') || lower.includes('sodhari')) {
+      if (typeof setOtherIncomeTabMode === 'function') setOtherIncomeTabMode('Sodhari');
+      else { selectedOtherIncomeMode = 'Sodhari'; renderOtherIncomeTabTable(); }
+    } else if (lower.includes('anniversary')) {
+      if (typeof setOtherIncomeTabMode === 'function') setOtherIncomeTabMode('Anniversary');
+      else { selectedOtherIncomeMode = 'Anniversary'; renderOtherIncomeTabTable(); }
+    } else {
+      if (typeof setOtherIncomeTabMode === 'function') setOtherIncomeTabMode('All');
+      else { selectedOtherIncomeMode = 'All'; renderOtherIncomeTabTable(); }
+    }
+    showDrilldownNotice(name, 'Other Income Statement');
+    return;
+  }
+
+  // 5. Cash in Hand / Cash Opening Balance
+  if (lower.includes('cash in hand') || lower.includes('cash balance') || lower === 'opening balance cash in hand') {
+    switchTab('transactionsTab');
+    if (typeof renderRecentTransactions === 'function') renderRecentTransactions();
+    showDrilldownNotice(name, 'Cash Book');
+    return;
+  }
+
+  // 5.5. Bank Interest (Income) -> Bank Book with Interest Search
+  if (lower.includes('bank interest') || (lower.includes('interest') && !lower.includes('sodari'))) {
+    switchTab('bankBookTab');
+    const accFilter = document.getElementById('bankBookAccountFilter');
+    if (accFilter) accFilter.value = 'ALL';
+    const searchInput = document.getElementById('bankBookSearchInput');
+    if (searchInput) searchInput.value = 'Interest';
+    if (typeof renderBankBookTransactions === 'function') renderBankBookTransactions();
+    showDrilldownNotice(name, 'Bank Book');
+    return;
+  }
+
+  // 6. Bank Book Accounts (Current Account, Fixed Deposit, Closing Reserves)
+  if (lower.includes('state bank') || lower.includes('sbi') || lower.includes('current') || lower.includes('fixed deposit') || lower.includes('closing balance')) {
+    switchTab('bankBookTab');
+    const accFilter = document.getElementById('bankBookAccountFilter');
+    if (accFilter) {
+      if (lower.includes('fixed deposit') || lower.includes('fd')) {
+        accFilter.value = 'SBI Fixed Deposit';
+      } else if (lower.includes('current') || lower.includes('state bank') || lower.includes('sbi')) {
+        accFilter.value = 'State Bank of India';
+      } else {
+        accFilter.value = 'ALL';
+      }
+    }
+    if (typeof renderBankBookTransactions === 'function') renderBankBookTransactions();
+    showDrilldownNotice(name, 'Bank Book');
+    return;
+  }
+
+  // 7. Suspense
+  if (lower.includes('suspense')) {
+    switchTab('suspenseTab');
+    if (typeof renderSuspenseTable === 'function') renderSuspenseTable();
+    showDrilldownNotice(name, 'Suspense Accounts');
+    return;
+  }
+
+  // 7.3. Salary & Allowance -> Ledger Tab
+  if (lower.includes('salary')) {
+    switchTab('ledgerTab');
+    populateLedgerSubtypeDropdown('Salary (Pr. T.T.Simon)');
+    const searchInput = document.getElementById('ledgerSearchInput');
+    if (searchInput) searchInput.value = '';
+    renderLedgerTabTable();
+    showDrilldownNotice(name, 'Ledger Accounts');
+    return;
+  }
+  if (lower.includes('allowance')) {
+    switchTab('ledgerTab');
+    populateLedgerSubtypeDropdown('Allowance (Pr. T.T.Simon)');
+    const searchInput = document.getElementById('ledgerSearchInput');
+    if (searchInput) searchInput.value = '';
+    renderLedgerTabTable();
+    showDrilldownNotice(name, 'Ledger Accounts');
+    return;
+  }
+
+  // 7.4. General Body / Anniversary Meeting Expenses -> Ledger Tab
+  if (lower.includes('general body') || lower.includes('generalbody') || (lower.includes('anniversary') && !lower.includes('received'))) {
+    switchTab('ledgerTab');
+    populateLedgerSubtypeDropdown('General Body/Anniversary Meeting Expenses');
+    const searchInput = document.getElementById('ledgerSearchInput');
+    if (searchInput) searchInput.value = '';
+    renderLedgerTabTable();
+    showDrilldownNotice(name, 'Ledger Accounts');
+    return;
+  }
+
+  // 7.5. Dynamic Tabs (Monthly Meeting, etc.)
+  if ((lower.includes('monthly meeting') || lower.includes('monthlymeeting')) && !lower.includes('general body') && !lower.includes('anniversary')) {
+    const mmTabId = 'dynamicTab_MonthlyMeeting';
+    if (document.getElementById(mmTabId)) {
+      switchTab(mmTabId);
+      if (typeof renderDynamicTabTable === 'function') renderDynamicTabTable('Monthly Meeting');
+      showDrilldownNotice(name, 'Monthly Meeting');
+      return;
+    }
+  }
+
+  const dynTypes = (typeof dynamicTypes !== 'undefined' && Array.isArray(dynamicTypes)) ? dynamicTypes : ['Monthly Meeting'];
+  for (const dt of dynTypes) {
+    const dtId = 'dynamicTab_' + dt.replace(/[^a-zA-Z0-9]/g, '');
+    if (lower.includes(dt.toLowerCase()) || dt.toLowerCase().includes(lower)) {
+      if (document.getElementById(dtId)) {
+        switchTab(dtId);
+        if (typeof renderDynamicTabTable === 'function') renderDynamicTabTable(dt);
+        showDrilldownNotice(name, dt);
+        return;
+      }
+    }
+  }
+
+  // 8. General / Ledger Expenditures & custom types -> Ledger Tab
+  switchTab('ledgerTab');
+  populateLedgerSubtypeDropdown(name);
+  const searchInput = document.getElementById('ledgerSearchInput');
+  if (searchInput) searchInput.value = '';
+  renderLedgerTabTable();
+  showDrilldownNotice(name, 'Ledger Accounts');
 }
 
 function renderDashboard(data) {
@@ -5394,6 +7331,14 @@ function renderDashboard(data) {
   if (allTimeBankBookList && allTimeBankBookList.length > 0) {
     targetBankList = filterListByFY(allTimeBankBookList);
   }
+  if (!targetBankList || targetBankList.length === 0) {
+    const fallbackBank = (typeof loadedBankBookTransactions !== 'undefined' && loadedBankBookTransactions.length > 0)
+      ? loadedBankBookTransactions
+      : (typeof globalRawBankTransactions !== 'undefined' && globalRawBankTransactions.length > 0 ? globalRawBankTransactions : []);
+    if (fallbackBank.length > 0) {
+      targetBankList = filterListByFY(fallbackBank);
+    }
+  }
 
   const dyn = buildDynamicStatementItems(currentGeneralTxList, targetBankList, currentSuspenseTxList);
 
@@ -5412,6 +7357,17 @@ function renderDashboard(data) {
       const nameStr = (tx.name || tx.accountName || '').toLowerCase();
       const isOpening = typeStr.includes('opening balance') || descStr.includes('opening balance') || nameStr.includes('opening balance');
       if (isOpening) return;
+
+      const bSubtype = (tx.bankSubtype || '').toLowerCase();
+      const isInterBank = bSubtype.includes('inter-bank') || bSubtype.includes('inter transfer') || descStr.includes('inter-bank') || descStr.includes('inter transfer') || typeStr.includes('inter-bank') || descStr.includes('transfer from state bank of india to sbi fixed deposit');
+      if (isInterBank) return;
+
+      const entryType = (tx.entryType || 'Cash').toLowerCase();
+      const isContra = bSubtype.includes('cash deposit') || bSubtype.includes('cash withdrawal') || descStr.includes('cash deposit') || descStr.includes('cash withdrawal');
+      const isBank = entryType === 'bank' || String(tx.vrNo || '').toLowerCase().endsWith('/b');
+
+      if (isBank && !isContra && tx.addToCashBook !== true && tx.inCashBook !== true) return;
+
       cashHand += Number(tx.receipt || 0) - Number(tx.payment || tx.payments || 0);
     });
   }
@@ -5419,24 +7375,39 @@ function renderDashboard(data) {
   let sbiCurrentBal = cf.sbi;
   let sbiFdBal = cf.fd;
 
-  if (targetBankList.length > 0) {
+  if (targetBankList && targetBankList.length > 0) {
     targetBankList.forEach(tx => {
       const type = (tx.type || '').toLowerCase();
-      const desc = (tx.description || '').toLowerCase();
+      const desc = (tx.description || tx.particulars || '').toLowerCase();
       const name = (tx.name || tx.accountName || '').toLowerCase();
       const isOpening = type === 'opening balance' || desc.includes('opening balance') || name.includes('opening balance');
 
       if (isOpening) return;
 
-      const isReceipt = tx.mode && tx.mode.includes("Receipt");
-      const amt = Number(tx.amount || 0);
+      const isCredit = (typeof isTxReceipt === 'function')
+        ? (isTxReceipt(tx) === 1)
+        : ((Number(tx.credit || tx.receipt || 0) > 0) || (tx.mode && (tx.mode.includes("Receipt") || tx.mode.includes("Credit"))));
+      const amt = Number(tx.amount || tx.credit || tx.receipt || tx.debit || tx.payment || tx.payments || 0);
 
-      if (tx.account === 'State Bank of India') {
-        if (isReceipt) sbiCurrentBal += amt;
-        else sbiCurrentBal -= amt;
-      } else if (tx.account === 'SBI Fixed Deposit') {
-        if (isReceipt) sbiFdBal += amt;
+      const accLower = (tx.account || tx.accountName || tx.account_name || tx.bankAccount || tx.bank_account || '').toLowerCase();
+      let isFD = false;
+      if (accLower.includes('fixed deposit') || accLower.includes('fd')) {
+        isFD = true;
+      } else if (accLower.includes('state bank') || accLower.includes('current') || accLower.includes('sbi')) {
+        isFD = false;
+      } else {
+        const bSubLower = (tx.bankSubtype || tx.bank_subtype || '').toLowerCase();
+        if (bSubLower.includes('fixed deposit') || bSubLower.includes('fd')) {
+          isFD = true;
+        }
+      }
+
+      if (isFD) {
+        if (isCredit) sbiFdBal += amt;
         else sbiFdBal -= amt;
+      } else {
+        if (isCredit) sbiCurrentBal += amt;
+        else sbiCurrentBal -= amt;
       }
     });
   }
@@ -5450,7 +7421,9 @@ function renderDashboard(data) {
   const elSbiFd = document.getElementById('dashSbiFd');
   if (elSbiFd) elSbiFd.innerText = formatCurrencyNoSymbolWithDecimals(sbiFdBal);
   const elBankReserves = document.getElementById('dashBankReserves');
-  if (elBankReserves) elBankReserves.innerText = formatCurrencyNoSymbolWithDecimals(cashHand + sbiCurrentBal + sbiFdBal);
+  const totalReservesAmt = cashHand + sbiCurrentBal + sbiFdBal;
+  if (elBankReserves) elBankReserves.innerText = formatCurrencyNoSymbolWithDecimals(totalReservesAmt);
+
 
   // Header totals (will be adjusted after table-level calculations to include contra flows)
   const incHeader = document.getElementById('incomeHeaderTotal');
@@ -5459,7 +7432,7 @@ function renderDashboard(data) {
   const expHeader = document.getElementById('expenseHeaderTotal');
   if (expHeader) expHeader.innerText = formatCurrencyNoSymbolWithDecimals(expTotal);
   const footerBalanceEl = document.getElementById('footerTotalBalance');
-  if (footerBalanceEl) footerBalanceEl.innerText = formatCurrencyNoSymbolWithDecimals(cashHand + sbiCurrentBal + sbiFdBal);
+  if (footerBalanceEl) footerBalanceEl.innerText = formatCurrencyNoSymbolWithDecimals(totalReservesAmt);
 
   // Suspense Alert logic
   const suspenseBellBtn = document.getElementById('dashSuspenseBellBtn');
@@ -5493,9 +7466,15 @@ function renderDashboard(data) {
         const isOpening = item.name.toLowerCase().indexOf('opening balance') !== -1;
         const amt = Number(item.amount || 0);
         totalAmt += amt;
+        const safeName = (item.name || '').replace(/'/g, "\\'");
         incHtml += `
-              <tr class="${isOpening ? 'highlight-row' : ''}">
-                <td style="font-weight: 600; padding: 10px 12px;">${item.name}</td>
+              <tr class="${isOpening ? 'highlight-row' : ''} dashboard-clickable-row" onclick="drilldownFromDashboard('${safeName}', 'income')" title="Click to inspect ${safeName} breakdown ↗">
+                <td style="font-weight: 600; padding: 10px 12px;">
+                  <span style="display: inline-flex; align-items: center; justify-content: space-between; width: 100%;">
+                    <span>${item.name}</span>
+                    <span class="dash-row-drill-icon" style="font-size: 0.72rem; opacity: 0.45; transition: all 0.2s ease; margin-left: 6px;">↗</span>
+                  </span>
+                </td>
                 <td class="amount-col ${amt ? 'income-amt' : 'zero-amt'}" style="font-weight: 700; text-align: right; padding: 10px 12px;">${formatCurrencyNoSymbolWithDecimals(amt)}</td>
               </tr>
             `;
@@ -5516,8 +7495,8 @@ function renderDashboard(data) {
     }
 
     incHtml += `
-          <tr style="background: #fef2f2; font-weight: 800; border-top: 2px solid #cbd5e1; border-bottom: 1px solid #cbd5e1;">
-            <td style="font-weight: 800; padding: 12px 12px; color: #0f172a;">Total Income</td>
+          <tr class="dashboard-total-row" style="font-weight: 800; border-top: 2px solid #cbd5e1; border-bottom: 1px solid #cbd5e1;">
+            <td style="font-weight: 800; padding: 12px 12px;">Total Income</td>
             <td class="amount-col income-amt" style="font-weight: 800; text-align: right; padding: 12px 12px;">${formatCurrencyNoSymbolWithDecimals(totalAmt)}</td>
           </tr>
         `;
@@ -5537,9 +7516,15 @@ function renderDashboard(data) {
         const isBank = item.name.toLowerCase().indexOf('state bank') !== -1 || item.name.toLowerCase().indexOf('fixed deposit') !== -1;
         const amt = Number(item.amount || 0);
         totalAmt += amt;
+        const safeName = (item.name || '').replace(/'/g, "\\'");
         expHtml += `
-              <tr class="${isBank ? 'highlight-row' : ''}">
-                <td style="font-weight: 600; padding: 10px 12px;">${item.name}</td>
+              <tr class="${isBank ? 'highlight-row' : ''} dashboard-clickable-row" onclick="drilldownFromDashboard('${safeName}', 'expense')" title="Click to inspect ${safeName} breakdown ↗">
+                <td style="font-weight: 600; padding: 10px 12px;">
+                  <span style="display: inline-flex; align-items: center; justify-content: space-between; width: 100%;">
+                    <span>${item.name}</span>
+                    <span class="dash-row-drill-icon" style="font-size: 0.72rem; opacity: 0.45; transition: all 0.2s ease; margin-left: 6px;">↗</span>
+                  </span>
+                </td>
                 <td class="amount-col ${amt ? 'expense-amt' : 'zero-amt'}" style="font-weight: 700; text-align: right; padding: 10px 12px;">${formatCurrencyNoSymbolWithDecimals(amt)}</td>
               </tr>
             `;
@@ -5560,8 +7545,8 @@ function renderDashboard(data) {
     }
 
     expHtml += `
-          <tr style="background: #fef2f2; font-weight: 800; border-top: 2px solid #cbd5e1; border-bottom: 1px solid #cbd5e1;">
-            <td style="font-weight: 800; padding: 12px 12px; color: #0f172a;">Total Expenditure</td>
+          <tr class="dashboard-total-row" style="font-weight: 800; border-top: 2px solid #cbd5e1; border-bottom: 1px solid #cbd5e1;">
+            <td style="font-weight: 800; padding: 12px 12px;">Total Expenditure</td>
             <td class="amount-col expense-amt" style="font-weight: 800; text-align: right; padding: 12px 12px;">${formatCurrencyNoSymbolWithDecimals(totalAmt)}</td>
           </tr>
         `;
@@ -5853,15 +7838,59 @@ function appendPrintCopy(container, canvas, wrapperClass, copyLabel) {
 function markTransactionAsPrinted(vrNoFieldId) {
   const vrNo = document.getElementById(vrNoFieldId) ? document.getElementById(vrNoFieldId).innerText.trim() : '';
   if (vrNo && vrNo !== '-' && vrNo !== '--') {
-    globalPrintStatusMap[normalizeVrLocally(vrNo)] = true;
     const clean = normalizeVrLocally(vrNo);
-    const tx = allTimeGeneralTxList.find(t => normalizeVrLocally(t.vrNo) === clean || normalizeVrLocally(t.rcptNo) === clean || normalizeVrLocally(t.payNo) === clean);
+    globalPrintStatusMap[clean] = true;
+
+    const currentTx = (vrNoFieldId === 'rRcptNo') ? currentReceiptTx : currentPaymentTx;
+    const isBank = currentTx && (
+      (currentTx.entryType && String(currentTx.entryType).toLowerCase() === 'bank') ||
+      currentTx.bankAccount ||
+      (currentTx.vrNo && String(currentTx.vrNo).endsWith('/B')) ||
+      currentTx.bank_name ||
+      currentTx.bankSubtype
+    );
+
+    const bankTxs = (typeof loadedBankBookTransactions !== 'undefined' && loadedBankBookTransactions.length > 0)
+      ? loadedBankBookTransactions
+      : (typeof allTimeBankBookList !== 'undefined' ? allTimeBankBookList : []);
+    const cashTxs = (typeof allTimeGeneralTxList !== 'undefined' && allTimeGeneralTxList.length > 0)
+      ? allTimeGeneralTxList
+      : (typeof globalRawTransactions !== 'undefined' ? globalRawTransactions : []);
+
+    let tx = null;
+    let targetCollection = 'transactions';
+
+    if (isBank) {
+      if (currentTx && (currentTx.id || currentTx._docId)) {
+        tx = bankTxs.find(t => String(t.id) === String(currentTx.id) || String(t._docId) === String(currentTx._docId || currentTx.id));
+      }
+      if (!tx) {
+        tx = bankTxs.find(t => normalizeVrLocally(t.vrNo) === clean || normalizeVrLocally(t.rcptNo) === clean || normalizeVrLocally(t.payNo) === clean);
+      }
+      if (tx) {
+        targetCollection = 'bank_transactions';
+      }
+    } else {
+      if (currentTx && (currentTx.id || currentTx._docId)) {
+        tx = cashTxs.find(t => String(t.id) === String(currentTx.id) || String(t._docId) === String(currentTx._docId || currentTx.id));
+      }
+      if (!tx) {
+        tx = cashTxs.find(t => normalizeVrLocally(t.vrNo) === clean || normalizeVrLocally(t.rcptNo) === clean || normalizeVrLocally(t.payNo) === clean);
+      }
+      if (!tx) {
+        tx = bankTxs.find(t => normalizeVrLocally(t.vrNo) === clean || normalizeVrLocally(t.rcptNo) === clean || normalizeVrLocally(t.payNo) === clean);
+        if (tx) targetCollection = 'bank_transactions';
+      }
+    }
+
     if (tx && !tx.printed) {
       tx.printed = true;
-      db.collection("transactions").doc(String(tx._docId || tx.id)).update({ printed: true });
+      if (typeof db !== 'undefined' && db && db.collection) {
+        db.collection(targetCollection).doc(String(tx._docId || tx.id)).update({ printed: true });
+      }
     }
-    renderRecentTransactions();
-    renderBankBookTransactions();
+    if (typeof renderRecentTransactions === 'function') renderRecentTransactions();
+    if (typeof renderBankBookTransactions === 'function') renderBankBookTransactions();
   }
 }
 
@@ -6252,7 +8281,7 @@ let allTimeGeneralTxList = [];
 let allTimeSuspenseTxList = [];
 let currentGeneralTxList = [];
 let currentSuspenseTxList = [];
-let currentGlobalFY = "All"; // "All" or "2026-2027"
+let currentGlobalFY = "2026-2027"; // Active financial year for database records
 
 // Parse the date string into a Date object
 function parseTxDate(tx) {
@@ -6377,6 +8406,8 @@ function filterListByFY(list) {
   const endDate = new Date(endYear, 2, 31, 23, 59, 59); // March 31st
 
   const filtered = list.filter(tx => {
+    if (tx.financialYear && currentGlobalFY && tx.financialYear === currentGlobalFY) return true;
+    if (tx.financial_year && currentGlobalFY && tx.financial_year === currentGlobalFY) return true;
     const d = parseTxDate(tx);
     if (!d) return true; // Keep transactions with invalid/missing dates so they are not lost
     return d >= startDate && d <= endDate;
@@ -6394,10 +8425,20 @@ function getEarliestOpeningBalances() {
     ? window.openingBalancesStore
     : (globalRawOpening && Object.keys(globalRawOpening).length > 0 ? globalRawOpening : {});
 
-  const fyKey = currentGlobalFY || "2026-2027";
-  const balances = (store && store[fyKey])
-    ? store[fyKey]
-    : ((store && store["default"]) ? store["default"] : (store && store["2026-2027"] ? store["2026-2027"] : { cash: 0, sbi: 0, fd: 0 }));
+  const fyKey = (currentGlobalFY && currentGlobalFY !== "All") ? currentGlobalFY : "2026-2027";
+  let balances = null;
+  if (store) {
+    if (store[fyKey]) balances = store[fyKey];
+    else if (store["2026-2027"]) balances = store["2026-2027"];
+    else if (store["default"]) balances = store["default"];
+    else {
+      const keys = Object.keys(store);
+      if (keys.length > 0) balances = store[keys[0]];
+    }
+  }
+  if (!balances) {
+    balances = { cash: 127005, sbi: 143068.37, fd: 108022 };
+  }
 
   cashAmt = Number(balances.cash ?? balances.cash_amount ?? 0);
   sbiAmt = Number(balances.sbi ?? balances.sbiCurrent ?? balances.sbi_current_amount ?? 0);
@@ -6476,9 +8517,20 @@ function calculateCarryForward() {
 
         const isReceipt = isTxReceipt(tx) === 1;
         const amt = Number(tx.amount || tx.receipt || tx.payment || tx.payments || 0);
-        const accLower = (tx.account || '').toLowerCase();
-
+        const accLower = (tx.account || tx.accountName || tx.account_name || tx.bankAccount || tx.bank_account || '').toLowerCase();
+        let isFD = false;
         if (accLower.includes('fixed deposit') || accLower.includes('fd')) {
+          isFD = true;
+        } else if (accLower.includes('state bank') || accLower.includes('current') || accLower.includes('sbi')) {
+          isFD = false;
+        } else {
+          const bSubLower = (tx.bankSubtype || tx.bank_subtype || '').toLowerCase();
+          if (bSubLower.includes('fixed deposit') || bSubLower.includes('fd')) {
+            isFD = true;
+          }
+        }
+
+        if (isFD) {
           if (isReceipt) cf.fd += amt;
           else cf.fd -= amt;
         } else {
@@ -6559,9 +8611,20 @@ function getCalculationBreakdown() {
 
         const isReceipt = isTxReceipt(tx) === 1;
         const amt = Number(tx.amount || tx.receipt || tx.payment || tx.payments || 0);
-        const accLower = (tx.account || '').toLowerCase();
-
+        const accLower = (tx.account || tx.accountName || tx.account_name || tx.bankAccount || tx.bank_account || '').toLowerCase();
+        let isFD = false;
         if (accLower.includes('fixed deposit') || accLower.includes('fd')) {
+          isFD = true;
+        } else if (accLower.includes('state bank') || accLower.includes('current') || accLower.includes('sbi')) {
+          isFD = false;
+        } else {
+          const bSubLower = (tx.bankSubtype || tx.bank_subtype || '').toLowerCase();
+          if (bSubLower.includes('fixed deposit') || bSubLower.includes('fd')) {
+            isFD = true;
+          }
+        }
+
+        if (isFD) {
           if (isReceipt) fd.priorReceipts += amt;
           else fd.priorPayments += amt;
         } else {
@@ -6591,12 +8654,15 @@ function getAvailableFyList() {
   const currentMonth = now.getMonth(); // 0 = Jan, 3 = Apr
   const baseYear = currentMonth < 3 ? currentYear - 1 : currentYear;
 
+  const minYear = Math.min(baseYear - 3, 2023);
+  const maxYear = Math.max(baseYear + 2, 2027);
+
   const list = [];
-  for (let i = baseYear - 3; i <= baseYear + 2; i++) {
+  for (let i = minYear; i <= maxYear; i++) {
     const fyString = i + "-" + (i + 1);
     list.push({
       value: fyString,
-      isCurrent: i === baseYear,
+      isCurrent: fyString === "2026-2027",
       startYear: i,
       endYear: i + 1,
       label: `FY ${fyString}`
@@ -6744,18 +8810,24 @@ function initFyDropdown() {
   optAll.innerText = "All Time";
   select.appendChild(optAll);
 
-  let currentYearFy = "All";
+  let has2627 = false;
   fyList.forEach(fy => {
+    if (fy.value === '2026-2027') has2627 = true;
     const opt = document.createElement('option');
     opt.value = fy.value;
-    opt.innerText = fy.isCurrent ? `FY ${fy.value} (Current)` : `FY ${fy.value}`;
-    if (fy.isCurrent) {
-      currentYearFy = fy.value;
-    }
+    const isTarget = fy.value === '2026-2027';
+    opt.innerText = isTarget ? `FY ${fy.value} (Current)` : `FY ${fy.value}`;
     select.appendChild(opt);
   });
 
-  const targetFy = (currentGlobalFY && currentGlobalFY !== "All") ? currentGlobalFY : currentYearFy;
+  if (!has2627) {
+    const opt2627 = document.createElement('option');
+    opt2627.value = '2026-2027';
+    opt2627.innerText = 'FY 2026-2027 (Current)';
+    select.appendChild(opt2627);
+  }
+
+  const targetFy = (currentGlobalFY && currentGlobalFY !== "All") ? currentGlobalFY : "2026-2027";
   select.value = targetFy;
   currentGlobalFY = targetFy;
 
@@ -6811,7 +8883,7 @@ function renderRecentTransactions(list) {
 
   const filteredList = targetList.filter(tx => {
     const type = (tx.type || '').toLowerCase();
-    const desc = (tx.description || '').toLowerCase();
+    const desc = (tx.description || tx.particulars || '').toLowerCase();
     const isOpeningBalance = type === 'opening balance' || desc.includes('opening balance');
 
     if (isOpeningBalance) {
@@ -6868,11 +8940,26 @@ function renderRecentTransactions(list) {
     let cleanVr = normalizeVrLocally(rawVr);
     let isBlankVr = !cleanVr || cleanVr === '-' || cleanVr === '--' || cleanVr === 'ob';
 
+    const descLower = (tx.description || tx.particulars || '').toLowerCase();
+    const subLower = (tx.subtype || '').toLowerCase();
+    const bSubLower = (tx.bankSubtype || '').toLowerCase();
+    const typeLower = (tx.type || '').toLowerCase();
+    const isContraEntry = tx._bankContra ||
+      typeLower === 'contra' ||
+      subLower.includes('contra') ||
+      bSubLower.includes('contra') ||
+      descLower.includes('cash deposit') ||
+      descLower.includes('cash withdrawal') ||
+      subLower.includes('cash deposit') ||
+      subLower.includes('cash withdrawal');
+
     let groupingKey;
     if (tx.splitGroupId) {
       groupingKey = 'split_' + tx.splitGroupId;
     } else if (tx.transactionId && String(tx.transactionId).trim() !== '') {
       groupingKey = 'txid_' + tx.transactionId;
+    } else if (isContraEntry) {
+      groupingKey = 'contra_' + (tx.date || '') + '_' + tx.id;
     } else if (!isBlankVr) {
       groupingKey = cleanVr + '_' + (tx.date || '');
     } else if (tx.isSplitEntry) {
@@ -6883,11 +8970,12 @@ function renderRecentTransactions(list) {
 
     const rcpt = Number(tx.receipt || 0);
     const pmt = Number(tx.payment || tx.payments || 0);
-    const dStr = (tx.description || tx.subtype || tx.type || '').trim();
+    const dStr = (tx.description || tx.particulars || tx.subtype || tx.type || '').trim();
     const typeStr = (tx.type || '').trim();
 
     if (!baseVrMap[groupingKey]) {
       const newTx = Object.assign({}, tx);
+      if (isContraEntry) newTx.isContra = true;
       newTx.receipt = rcpt;
       newTx.payment = pmt;
       newTx.allVrNos = rawVr ? [rawVr] : [];
@@ -7019,10 +9107,32 @@ function renderRecentTransactions(list) {
       const cleanVr = formatVrNoClean(tx.vrNo);
       const isPrinted = '';
 
-      const isContra = !cleanVr || cleanVr === '-' || cleanVr === '--';
+      const dStrCheck = (tx.description || tx.particulars || '').toLowerCase();
+      const sStrCheck = (tx.subtype || '').toLowerCase();
+      const bStrCheck = (tx.bankSubtype || '').toLowerCase();
+      const tStrCheck = (tx.type || '').toLowerCase();
+      const isContra = tx.isContra || tx._bankContra ||
+        tStrCheck === 'contra' ||
+        sStrCheck.includes('contra') ||
+        bStrCheck.includes('contra') ||
+        dStrCheck.includes('cash deposit') ||
+        dStrCheck.includes('cash withdrawal') ||
+        sStrCheck.includes('cash deposit') ||
+        sStrCheck.includes('cash withdrawal');
+
+      const contraVr = tx.contra_vr_no || tx.contraVrNo || tx.bank_vr_no || tx.bankVrNo || '';
+      let displayVr = cleanVr && cleanVr !== '-' && cleanVr !== '--' ? cleanVr : (isContra && contraVr ? contraVr : '--');
+      if (isContra && contraVr && contraVr !== cleanVr && cleanVr && cleanVr !== '-' && cleanVr !== '--') {
+        displayVr = `<div>${cleanVr}</div><span style="display:inline-block; font-size:10px; color:#4f46e5; font-weight:700; background:#eef2ff; border:1px solid #c7d2fe; border-radius:3px; padding:1px 4px; margin-top:2px;" title="Paired Contra Bank No.">Bk: ${contraVr}</span>`;
+      }
+
       let hasRcpt = false;
       let hasPmt = false;
-      if (!isContra) {
+      if (isContra) {
+        const isDeposit = sStrCheck.includes('deposit') || bStrCheck.includes('deposit') || dStrCheck.includes('deposit') || pmtVal > 0;
+        if (isDeposit) hasPmt = true; // Cash leaves cash box -> Cash Payment Voucher
+        else hasRcpt = true; // Cash enters cash box -> Cash Receipt
+      } else {
         if (tx.type === 'Charity' && tx.subtype) {
           if (tx.subtype.toLowerCase().includes('received')) hasRcpt = true;
           else if (tx.subtype.toLowerCase().includes('paid')) hasPmt = true;
@@ -7066,19 +9176,19 @@ function renderRecentTransactions(list) {
             <tr style="border-bottom: 1px solid #f1f5f9;">
               <td style="text-align: center;">${!tx._suspenseTx ? `<input type="checkbox" class="cash-batch-checkbox" value="${cleanVr}" data-tx-ids="${txIdsAttr}" data-split-group="${splitGroupAttr}">` : ''}</td>
               <td style="font-weight: 500; color: #334155; white-space: nowrap;"><span style="color: #94a3b8; font-size: 0.85rem; margin-right: 4px;"></span>${formatDateHtml(tx.date)}</td>
-              <td style="font-weight: 700; color: #64748b; text-align: center;">${cleanVr}</td>
+              <td style="font-weight: 700; color: #64748b; text-align: center;">${displayVr}</td>
               <td style="font-weight: 600; color: #0f172a;">${memberCellHtml}</td>
-              <td style="color: #475569;">${tx.description || '-'}</td>
+              <td style="color: #475569;">${tx.description || tx.particulars || '-'}</td>
               <td class="num-col rcpt-val" style="font-weight: 700; color: #047857; text-align: right;">${rcptVal ? formatCurrency(rcptVal) : '-'}</td>
               <td class="num-col pmt-val" style="font-weight: 700; color: #b91c1c; text-align: right;">${pmtVal ? formatCurrency(pmtVal) : '-'}</td>
               <td class="num-col" style="font-weight: 700; color: #1e40af; text-align: right;">${formatCurrency(tx._runningBalance)}</td>
               <td><span class="cb-badge-pill ${catClass}">${tx.type || '--'}</span></td>
               <td style="text-align: center; white-space: nowrap;">
                 ${!tx._suspenseTx ? `
-                  <button class="btn-action btn-table-action" style="background: #0f172a; color: #ffffff; border: none; border-radius: 6px; padding: 4px 8px;" onclick="openTransactionDetailModal('${cleanVr}')" title="View Details">👁️</button>
-                  <button class="btn-action btn-table-action" style="background: #2563eb; color: #ffffff; border: none; border-radius: 6px; padding: 4px 8px;" onclick="loadEntryForEdit('${cleanVr}')" title="Edit Entry">✏️</button>
-                  ${hasRcpt ? `<button class="btn-action btn-table-action" style="background: #059669; color: #ffffff; border: none; border-radius: 6px; padding: 4px 8px;" onclick="openReceiptModalByVrNo('${cleanVr}')" title="Print Receipt">🧾${isPrinted}${tx.whatsappSent ? ' <span title="WhatsApp Sent" style="font-size: 0.8rem; margin-left: 2px;">💬</span>' : ''}</button>` : ''}
-                  ${hasPmt ? `<button class="btn-action btn-table-action" style="background: #dc2626; color: #ffffff; border: none; border-radius: 6px; padding: 4px 8px;" onclick="openPaymentVoucherModalByVrNo('${cleanVr}')" title="Print Voucher">🧾${isPrinted}${tx.whatsappSent ? ' <span title="WhatsApp Sent" style="font-size: 0.8rem; margin-left: 2px;">💬</span>' : ''}</button>` : ''}
+                  <button class="btn-action btn-table-action" style="background: #0f172a; color: #ffffff; border: none; border-radius: 6px; padding: 4px 8px;" onclick="openTransactionDetailModal('${tx.vrNo || cleanVr}', '${tx.id}')" title="View Details">👁️</button>
+                  <button class="btn-action btn-table-action" style="background: #2563eb; color: #ffffff; border: none; border-radius: 6px; padding: 4px 8px;" onclick="loadEntryForEdit('${tx.vrNo || cleanVr}', '${tx.id}', '${tx.entryType || (isContra ? 'Bank' : 'Cash')}')" title="Edit Entry">✏️</button>
+                  ${hasRcpt ? `<button class="btn-action btn-table-action" style="background: #059669; color: #ffffff; border: none; border-radius: 6px; padding: 4px 8px;" onclick="openReceiptModalByVrNo('${(cleanVr && cleanVr !== '-' && cleanVr !== '--') ? cleanVr : (tx.voucher_no || tx.vr_no || contraVr || '')}')" title="Print Receipt">🧾${isPrinted}${tx.whatsappSent ? ' <span title="WhatsApp Sent" style="font-size: 0.8rem; margin-left: 2px;">💬</span>' : ''}</button>` : ''}
+                  ${hasPmt ? `<button class="btn-action btn-table-action" style="background: #dc2626; color: #ffffff; border: none; border-radius: 6px; padding: 4px 8px;" onclick="openPaymentVoucherModalByVrNo('${(cleanVr && cleanVr !== '-' && cleanVr !== '--') ? cleanVr : (tx.voucher_no || tx.vr_no || contraVr || '')}')" title="Print Voucher">🧾${isPrinted}${tx.whatsappSent ? ' <span title="WhatsApp Sent" style="font-size: 0.8rem; margin-left: 2px;">💬</span>' : ''}</button>` : ''}
                 ` : '<span style="color:#94a3b8; font-size: 0.8rem;">Suspense</span>'}
               </td>
             </tr>
@@ -7097,10 +9207,29 @@ function renderBankBookTransactionsOld(list) {
 
 
 
-function openTransactionDetailModal(vrNo) {
-  const cleanVrSearch = normalizeVrLocally(vrNo);
-  let foundTx = allTimeGeneralTxList.find(t => normalizeVrLocally(t.vrNo) === cleanVrSearch || normalizeVrLocally(t.rcptNo) === cleanVrSearch || normalizeVrLocally(t.payNo) === cleanVrSearch);
-  if (!foundTx) foundTx = loadedBankBookTransactions.find(t => normalizeVrLocally(t.vrNo) === cleanVrSearch || normalizeVrLocally(t.rcptNo) === cleanVrSearch || normalizeVrLocally(t.payNo) === cleanVrSearch);
+function openTransactionDetailModal(vrNo, txId, entryType) {
+  let foundTx = null;
+  const isBank = entryType === 'Bank' || (vrNo && String(vrNo).trim().endsWith('/B'));
+  const allTxs = (typeof allTimeGeneralTxList !== 'undefined' && allTimeGeneralTxList.length > 0) ? allTimeGeneralTxList : [];
+  const bankTxs = (typeof loadedBankBookTransactions !== 'undefined' && loadedBankBookTransactions.length > 0) ? loadedBankBookTransactions : [];
+
+  if (txId) {
+    if (isBank) {
+      foundTx = bankTxs.find(t => String(t.id) === String(txId)) || allTxs.find(t => String(t.id) === String(txId));
+    } else {
+      foundTx = allTxs.find(t => String(t.id) === String(txId)) || bankTxs.find(t => String(t.id) === String(txId));
+    }
+  }
+  if (!foundTx && vrNo && vrNo !== '--' && vrNo !== '-') {
+    const cleanVrSearch = normalizeVrLocally(vrNo);
+    if (isBank) {
+      foundTx = bankTxs.find(t => normalizeVrLocally(t.vrNo) === cleanVrSearch || normalizeVrLocally(t.rcptNo) === cleanVrSearch || normalizeVrLocally(t.payNo) === cleanVrSearch);
+      if (!foundTx) foundTx = allTxs.find(t => normalizeVrLocally(t.vrNo) === cleanVrSearch || normalizeVrLocally(t.rcptNo) === cleanVrSearch || normalizeVrLocally(t.payNo) === cleanVrSearch);
+    } else {
+      foundTx = allTxs.find(t => normalizeVrLocally(t.vrNo) === cleanVrSearch || normalizeVrLocally(t.rcptNo) === cleanVrSearch || normalizeVrLocally(t.payNo) === cleanVrSearch);
+      if (!foundTx) foundTx = bankTxs.find(t => normalizeVrLocally(t.vrNo) === cleanVrSearch || normalizeVrLocally(t.rcptNo) === cleanVrSearch || normalizeVrLocally(t.payNo) === cleanVrSearch);
+    }
+  }
 
   const modal = document.getElementById('viewTransactionModal');
   if (!modal) return;
@@ -7109,7 +9238,7 @@ function openTransactionDetailModal(vrNo) {
     populateViewModalData(foundTx);
     modal.style.display = 'flex';
   } else {
-    alert("Voucher #" + cleanVrSearch + " details not found.");
+    alert("Transaction #" + (vrNo || txId || '') + " details not found.");
   }
 }
 
@@ -7140,23 +9269,105 @@ function populateReceiptModalData(txData) {
   if (rawArray.length === 0) return;
 
   const firstTx = rawArray[0];
-  const txArray = (firstTx && firstTx.splitItems && firstTx.splitItems.length > 0)
-    ? firstTx.splitItems.map(item => Object.assign({}, firstTx, item, {
-      amount: item.amount || item.receipt || item.payment,
-      receipt: (firstTx.mode === 'Receipt' || !firstTx.payment) ? (item.amount || item.receipt) : ""
-    }))
-    : rawArray;
+  const allTxs = (typeof allTimeGeneralTxList !== 'undefined' && allTimeGeneralTxList.length > 0)
+    ? allTimeGeneralTxList
+    : (globalRawTransactions || []);
+
+  let txArray = [];
+  const sList = (firstTx && Array.isArray(firstTx.splitItems) && firstTx.splitItems.length > 0)
+    ? firstTx.splitItems
+    : ((firstTx && Array.isArray(firstTx._splitItems) && firstTx._splitItems.length > 0) ? firstTx._splitItems : null);
+
+  if (sList && sList.length > 0) {
+    txArray = sList.map(item => Object.assign({}, firstTx, item, {
+      amount: Number(item.amount || item.amt || item.receipt || item.credit || 0),
+      receipt: Number(item.amount || item.amt || item.receipt || item.credit || 0),
+      type: item.type || item.category || 'Split Item',
+      subtype: item.subtype || '',
+      month: item.month || item.subMonth || '',
+      description: item.description || item.desc || ''
+    }));
+  } else if (rawArray.length > 1) {
+    txArray = rawArray;
+  } else if (firstTx && firstTx.splitGroupId) {
+    const sgMatches = allTxs.filter(t => t.splitGroupId === firstTx.splitGroupId);
+    if (sgMatches.length > 1) {
+      txArray = sgMatches;
+    }
+  } else if (firstTx) {
+    const cleanVr = normalizeVrLocally(firstTx.vrNo);
+    if (cleanVr && cleanVr !== '-') {
+      const vrMatches = allTxs.filter(t => normalizeVrLocally(t.vrNo) === cleanVr);
+      if (vrMatches.length > 1) {
+        txArray = vrMatches;
+      }
+    }
+  }
+
+  // Text-based '+' split items fallback if still only 1 entry
+  if (txArray.length <= 1 && firstTx) {
+    const descText = (firstTx.description || firstTx.particulars || '').trim();
+    if (descText.includes('+')) {
+      const parts = descText.split(/\s*\+\s*/);
+      const parsedItems = [];
+      parts.forEach(part => {
+        const pTrimmed = part.trim();
+        if (!pTrimmed) return;
+        let pAmt = 0;
+        const parenMatch = pTrimmed.match(/\((?:[^0-9]*)([0-9]+(?:,[0-9]+)*(?:\.[0-9]+)?)\)/);
+        if (parenMatch) pAmt = parseFloat(parenMatch[1].replace(/,/g, ''));
+        if (!pAmt || isNaN(pAmt)) {
+          const symMatch = pTrimmed.match(/(?:rs\.?|inr|₹)\s*([0-9]+(?:,[0-9]+)*(?:\.[0-9]+)?)/i);
+          if (symMatch) pAmt = parseFloat(symMatch[1].replace(/,/g, ''));
+        }
+        if (pAmt > 0) {
+          const pLower = pTrimmed.toLowerCase();
+          let pType = 'Other';
+          let pSub = '';
+          if (pLower.includes('subscr')) pType = 'Subscription';
+          else if (pLower.includes('charity')) { pType = 'Charity'; pSub = 'Charity Received'; }
+          else if (pLower.includes('offering') || pLower.includes('offertory')) pType = 'Offering';
+          else if (pLower.includes('donation')) pType = 'Donation';
+          parsedItems.push({
+            ...firstTx,
+            type: pType,
+            subtype: pSub || pType,
+            amount: pAmt,
+            receipt: pAmt,
+            description: pTrimmed
+          });
+        }
+      });
+      if (parsedItems.length > 1) {
+        txArray = parsedItems;
+      }
+    }
+  }
+
+  if (txArray.length === 0) {
+    txArray = rawArray;
+  }
 
   const cleanVr = formatVrNoClean(firstTx.vrNo);
   const cleanDate = formatDateClean(firstTx.date);
-  const rawAccName = (firstTx.accountName && firstTx.accountName !== '-') ? firstTx.accountName : ((firstTx.name && firstTx.name !== '-') ? firstTx.name : (firstTx.description || '-'));
-  const accName = formatMemberDisplayName(rawAccName);
+  let rawAccName = (firstTx.accountName && firstTx.accountName !== '-') ? firstTx.accountName : ((firstTx.name && firstTx.name !== '-') ? firstTx.name : '');
+  if (!rawAccName && firstTx.description && firstTx.description !== '-') {
+    if (firstTx.description.includes(' - ')) {
+      const candidate = firstTx.description.split(' - ')[0].trim();
+      if (candidate && !candidate.toLowerCase().includes('bank') && !candidate.toLowerCase().includes('cash deposit')) {
+        rawAccName = candidate;
+      }
+    }
+    if (!rawAccName) rawAccName = firstTx.description;
+  }
+  const accName = formatMemberDisplayName(rawAccName || '-');
 
   document.getElementById('rRcptNo').innerText = cleanVr;
   document.getElementById('rDate').innerText = cleanDate;
   document.getElementById('rAccountName').innerText = accName;
   if (document.getElementById('rAddress')) {
-    document.getElementById('rAddress').innerText = firstTx.address ? firstTx.address : '-';
+    const resAddr = resolveMemberAddress(firstTx);
+    document.getElementById('rAddress').innerText = (resAddr || firstTx.address || '-');
   }
 
   let don = 0, sub = 0, off = 0, oth = 0;
@@ -7166,28 +9377,32 @@ function populateReceiptModalData(txData) {
   let totalAmt = 0;
 
   txArray.forEach(tx => {
-    const amt = Number(tx.receipt || tx.amount || 0);
+    const amt = Number(tx.receipt || tx.credit || tx.amount || tx.amt || 0);
     totalAmt += amt;
     const typeStr = (tx.type || '').toLowerCase();
     const subStr = (tx.subtype || '').toLowerCase();
-    const descStr = (tx.description || '').toLowerCase();
+    const bSubStr = (tx.bankSubtype || tx.bank_subtype || '').toLowerCase();
+    const catStr = (tx.category || '').toLowerCase();
+    const descStr = (tx.description || tx.particulars || tx.desc || '').toLowerCase();
 
     if (descStr.includes('cancelled') || typeStr.includes('cancelled') || (tx.accountName || '').toLowerCase().includes('cancelled')) {
       isCancelled = true;
     }
 
-    if (typeStr.includes('subscription') || subStr.includes('subscription')) {
+    if (typeStr.includes('subscription') || subStr.includes('subscription') || bSubStr.includes('subscription') || catStr.includes('subscription')) {
       sub += amt;
-      const m = tx.month || tx.subMonth;
+      const m = tx.month || tx.subMonth || tx.sub_month;
       if (m && !subMonthTextArr.includes(m)) subMonthTextArr.push(m);
-    } else if (typeStr.includes('offering') || subStr.includes('offertory')) {
+    } else if (typeStr.includes('offering') || subStr.includes('offertory') || bSubStr.includes('offertory') || catStr.includes('offering')) {
       off += amt;
-    } else if (typeStr.includes('donation') || subStr.includes('donation')) {
+    } else if (typeStr.includes('donation') || subStr.includes('donation') || bSubStr.includes('donation') || catStr.includes('donation')) {
       don += amt;
     } else {
       oth += amt;
-      let d = tx.description || tx.subtype || tx.type || 'Other Items';
-      if (typeStr === 'charity' || subStr === 'charity') d = 'Charity';
+      let d = tx.subtype || tx.bankSubtype || tx.category || tx.description || tx.particulars || tx.type || 'Other Items';
+      if (typeStr.includes('charity') || subStr.includes('charity') || bSubStr.includes('charity') || descStr.includes('charity')) {
+        d = 'Charity';
+      }
       if (d !== '-' && d !== 'Other Items' && !othDescArr.includes(d)) othDescArr.push(d);
     }
   });
@@ -7250,19 +9465,28 @@ function openReceiptModal(tx) {
     return;
   }
 
+  const isBank = (tx.entryType && String(tx.entryType).toLowerCase() === 'bank') || (tx.bankAccount && !tx.inCashBook) || (tx.vrNo && String(tx.vrNo).endsWith('/B'));
   const cleanVr = normalizeVrLocally(tx.vrNo || tx.rcptNo || '');
   const allTxs = (typeof allTimeGeneralTxList !== 'undefined' && allTimeGeneralTxList.length > 0)
     ? allTimeGeneralTxList
     : (globalRawTransactions || []);
+  const bankTxs = (typeof loadedBankBookTransactions !== 'undefined' && loadedBankBookTransactions.length > 0)
+    ? loadedBankBookTransactions
+    : (typeof allTimeBankBookList !== 'undefined' ? allTimeBankBookList : []);
+
   let matchingTxs = [];
   if (cleanVr && cleanVr !== '-') {
-    matchingTxs = allTxs.filter(t => normalizeVrLocally(t.vrNo) === cleanVr || normalizeVrLocally(t.rcptNo) === cleanVr || normalizeVrLocally(t.payNo) === cleanVr);
+    if (isBank) {
+      matchingTxs = bankTxs.filter(t => normalizeVrLocally(t.vrNo) === cleanVr || normalizeVrLocally(t.rcptNo) === cleanVr || normalizeVrLocally(t.payNo) === cleanVr);
+    } else {
+      matchingTxs = allTxs.filter(t => normalizeVrLocally(t.vrNo) === cleanVr || normalizeVrLocally(t.rcptNo) === cleanVr || normalizeVrLocally(t.payNo) === cleanVr);
+    }
   }
 
   if ((!matchingTxs || matchingTxs.length <= 1) && tx.splitItems && tx.splitItems.length > 0) {
     matchingTxs = tx.splitItems.map(item => Object.assign({}, tx, item, {
-      amount: item.amount || item.receipt || item.payment,
-      receipt: (tx.mode === 'Receipt' || !tx.payment) ? (item.amount || item.receipt) : ""
+      amount: item.amount || item.receipt || item.credit || item.payment,
+      receipt: (tx.mode === 'Receipt' || tx.mode === 'Credit (Receipt)' || !tx.payment) ? (item.amount || item.receipt || item.credit) : ""
     }));
   }
 
@@ -7277,23 +9501,54 @@ function openReceiptModal(tx) {
   }
 }
 
-function openReceiptModalByVrNo(vrNo, txId) {
+function openReceiptModalByVrNo(vrNo, txId, entryType) {
   const targetKey = String(txId || vrNo || '').trim();
   const cleanVrSearch = normalizeVrLocally(vrNo);
+  const isExplicitBank = entryType === 'Bank' || (vrNo && String(vrNo).trim().endsWith('/B'));
 
   const allTxs = (typeof allTimeGeneralTxList !== 'undefined' && allTimeGeneralTxList.length > 0)
     ? allTimeGeneralTxList
     : (globalRawTransactions || []);
-  const bankTxs = (typeof loadedBankBookTransactions !== 'undefined' && loadedBankBookTransactions) ? loadedBankBookTransactions : [];
+  const bankTxs = (typeof loadedBankBookTransactions !== 'undefined' && loadedBankBookTransactions.length > 0)
+    ? loadedBankBookTransactions
+    : (typeof allTimeBankBookList !== 'undefined' ? allTimeBankBookList : []);
 
   let matchingTxs = [];
+
+  // If explicit Bank request, prioritize Bank transactions
+  if (isExplicitBank) {
+    if (txId) {
+      const byId = bankTxs.find(t => String(t.id) === String(txId) || String(t._docId) === String(txId));
+      if (byId) {
+        if (byId.splitGroupId) {
+          matchingTxs = bankTxs.filter(t => t.splitGroupId === byId.splitGroupId);
+        } else if (cleanVrSearch && cleanVrSearch !== '-') {
+          matchingTxs = bankTxs.filter(t => normalizeVrLocally(t.vrNo) === cleanVrSearch || normalizeVrLocally(t.rcptNo) === cleanVrSearch || normalizeVrLocally(t.payNo) === cleanVrSearch);
+        }
+        if (matchingTxs.length === 0) matchingTxs = [byId];
+      }
+    }
+    if (matchingTxs.length === 0 && cleanVrSearch && cleanVrSearch !== '-') {
+      matchingTxs = bankTxs.filter(t =>
+        normalizeVrLocally(t.vrNo) === cleanVrSearch ||
+        normalizeVrLocally(t.rcptNo) === cleanVrSearch ||
+        normalizeVrLocally(t.payNo) === cleanVrSearch
+      );
+    }
+    if (matchingTxs.length > 0) {
+      openReceiptModal(matchingTxs);
+      return;
+    }
+  }
+
+  // Otherwise search cash transactions first
   if (cleanVrSearch && cleanVrSearch !== '-') {
     matchingTxs = allTxs.filter(t =>
       normalizeVrLocally(t.vrNo) === cleanVrSearch ||
       normalizeVrLocally(t.rcptNo) === cleanVrSearch ||
       normalizeVrLocally(t.payNo) === cleanVrSearch
     );
-    if (matchingTxs.length === 0) {
+    if (matchingTxs.length === 0 && !isExplicitBank) {
       matchingTxs = bankTxs.filter(t =>
         normalizeVrLocally(t.vrNo) === cleanVrSearch ||
         normalizeVrLocally(t.rcptNo) === cleanVrSearch ||
@@ -7309,26 +9564,32 @@ function openReceiptModalByVrNo(vrNo, txId) {
 
   let foundTx = null;
   if (targetKey) {
-    foundTx = allTxs.find(t => String(t.id) === targetKey || String(t._docId) === targetKey || String(t.vrNo) === targetKey);
-    if (!foundTx) {
+    if (isExplicitBank) {
       foundTx = bankTxs.find(t => String(t.id) === targetKey || String(t._docId) === targetKey || String(t.vrNo) === targetKey);
+      if (!foundTx) foundTx = allTxs.find(t => String(t.id) === targetKey || String(t._docId) === targetKey || String(t.vrNo) === targetKey);
+    } else {
+      foundTx = allTxs.find(t => String(t.id) === targetKey || String(t._docId) === targetKey || String(t.vrNo) === targetKey);
+      if (!foundTx) foundTx = bankTxs.find(t => String(t.id) === targetKey || String(t._docId) === targetKey || String(t.vrNo) === targetKey);
     }
   }
 
   if (foundTx) {
     openReceiptModal(foundTx);
   } else {
-    fetchApiData("getEntry", { vrNo: cleanVrSearch || targetKey })
+    fetchApiData("getEntry", { vrNo: cleanVrSearch || targetKey, entryType: isExplicitBank ? 'bank' : undefined })
       .then(res => {
         if (res && res.success && res.found) {
           openReceiptModal({
             date: res.date,
             vrNo: res.vrNo || targetKey,
             accountName: res.accountName,
+            address: res.address,
+            memberCode: res.memberCode,
             description: res.description,
-            receipt: res.receipt || res.amount,
+            receipt: res.receipt || res.credit || res.amount,
             type: res.type,
-            subtype: res.subtype
+            subtype: res.subtype,
+            entryType: isExplicitBank ? 'Bank' : res.entryType
           });
         } else {
           alert("Receipt #" + (cleanVrSearch || targetKey) + " details not found.");
@@ -7535,15 +9796,23 @@ function populatePaymentVoucherModalData(txInput) {
   const firstTx = rawArray[0];
   const txArray = (firstTx && firstTx.splitItems && firstTx.splitItems.length > 0)
     ? firstTx.splitItems.map(item => Object.assign({}, firstTx, item, {
-      amount: item.amount || item.payment || item.payments || item.receipt,
-      payment: (firstTx.mode === 'Payment' || !firstTx.receipt) ? (item.amount || item.payment || item.payments) : ""
+      amount: item.amount || item.payment || item.payments || item.debit || item.receipt,
+      payment: (firstTx.mode === 'Payment' || firstTx.mode === 'Debit (Payment)' || !firstTx.receipt) ? (item.amount || item.payment || item.payments || item.debit) : ""
     }))
     : rawArray;
 
   const cleanVr = formatVrNoClean(firstTx.vrNo);
   const cleanDate = formatDateClean(firstTx.date);
 
-  let rawAcc = firstTx.accountName && firstTx.accountName !== '-' ? firstTx.accountName : (firstTx.name && firstTx.name !== '-' ? firstTx.name : '');
+  let rawAcc = (firstTx.accountName && firstTx.accountName !== '-') ? firstTx.accountName : ((firstTx.name && firstTx.name !== '-') ? firstTx.name : '');
+  if (!rawAcc && firstTx.description && firstTx.description !== '-') {
+    if (firstTx.description.includes(' - ')) {
+      const candidate = firstTx.description.split(' - ')[0].trim();
+      if (candidate && !candidate.toLowerCase().includes('bank') && !candidate.toLowerCase().includes('cash withdrawal')) {
+        rawAcc = candidate;
+      }
+    }
+  }
   let accName = rawAcc ? formatMemberDisplayName(rawAcc) : '';
   let headAccountsList = [];
   let descLines = [];
@@ -7551,16 +9820,16 @@ function populatePaymentVoucherModalData(txInput) {
   let isCancelled = false;
 
   txArray.forEach(tx => {
-    const amt = Number(tx.payment || tx.payments || tx.amount || 0);
+    const amt = Number(tx.payment || tx.payments || tx.debit || tx.amount || 0);
     totalAmt += amt;
 
-    let sub = tx.subtype || tx.type || 'Expense';
+    let sub = tx.subtype || tx.bankSubtype || tx.category || tx.type || 'Expense';
     if (sub && sub !== '-' && !headAccountsList.includes(sub)) {
       headAccountsList.push(sub);
     }
 
     const typeStr = (tx.type || '').toLowerCase();
-    const descStr = (tx.description || '').toLowerCase();
+    const descStr = (tx.description || tx.particulars || '').toLowerCase();
     if (descStr.includes('cancelled') || typeStr.includes('cancelled') || (tx.accountName || '').toLowerCase().includes('cancelled')) {
       isCancelled = true;
     }
@@ -7597,10 +9866,18 @@ function populatePaymentVoucherModalData(txInput) {
     }
   }
 
+  // If bank cheque or bank account is present, display details cleanly
+  if (firstTx.chequeNo && !desc.toLowerCase().includes('chq') && !desc.toLowerCase().includes('cheque')) {
+    desc += ` (Chq No: ${firstTx.chequeNo})`;
+  }
+
   document.getElementById('pVoucherNo').innerText = cleanVr;
   document.getElementById('pDate').innerText = cleanDate;
   if (document.getElementById('pPaidTo')) document.getElementById('pPaidTo').innerText = accName || '-';
-  if (document.getElementById('pAddress')) document.getElementById('pAddress').innerText = firstTx.address ? firstTx.address : '-';
+  if (document.getElementById('pAddress')) {
+    const resAddr = resolveMemberAddress(firstTx);
+    document.getElementById('pAddress').innerText = (resAddr || firstTx.address || '-');
+  }
   document.getElementById('pHeadAccount').innerText = headAccount;
   document.getElementById('pDescription').innerText = desc;
 
@@ -7638,19 +9915,28 @@ function openPaymentVoucherModal(tx) {
     return;
   }
 
+  const isBank = (tx.entryType && String(tx.entryType).toLowerCase() === 'bank') || (tx.bankAccount && !tx.inCashBook) || (tx.vrNo && String(tx.vrNo).endsWith('/B'));
   const cleanVr = normalizeVrLocally(tx.vrNo || tx.payNo || '');
   const allTxs = (typeof allTimeGeneralTxList !== 'undefined' && allTimeGeneralTxList.length > 0)
     ? allTimeGeneralTxList
     : (globalRawTransactions || []);
+  const bankTxs = (typeof loadedBankBookTransactions !== 'undefined' && loadedBankBookTransactions.length > 0)
+    ? loadedBankBookTransactions
+    : (typeof allTimeBankBookList !== 'undefined' ? allTimeBankBookList : []);
+
   let matchingTxs = [];
   if (cleanVr && cleanVr !== '-') {
-    matchingTxs = allTxs.filter(t => normalizeVrLocally(t.vrNo) === cleanVr || normalizeVrLocally(t.rcptNo) === cleanVr || normalizeVrLocally(t.payNo) === cleanVr);
+    if (isBank) {
+      matchingTxs = bankTxs.filter(t => normalizeVrLocally(t.vrNo) === cleanVr || normalizeVrLocally(t.rcptNo) === cleanVr || normalizeVrLocally(t.payNo) === cleanVr);
+    } else {
+      matchingTxs = allTxs.filter(t => normalizeVrLocally(t.vrNo) === cleanVr || normalizeVrLocally(t.rcptNo) === cleanVr || normalizeVrLocally(t.payNo) === cleanVr);
+    }
   }
 
   if ((!matchingTxs || matchingTxs.length <= 1) && tx.splitItems && tx.splitItems.length > 0) {
     matchingTxs = tx.splitItems.map(item => Object.assign({}, tx, item, {
-      amount: item.amount || item.receipt || item.payment,
-      payment: (tx.mode === 'Payment' || !tx.receipt) ? (item.amount || item.payment) : ""
+      amount: item.amount || item.receipt || item.payment || item.debit,
+      payment: (tx.mode === 'Payment' || tx.mode === 'Debit (Payment)' || !tx.receipt) ? (item.amount || item.payment || item.payments || item.debit) : ""
     }));
   }
 
@@ -7665,23 +9951,54 @@ function openPaymentVoucherModal(tx) {
   }
 }
 
-function openPaymentVoucherModalByVrNo(vrNo, txId) {
+function openPaymentVoucherModalByVrNo(vrNo, txId, entryType) {
   const targetKey = String(txId || vrNo || '').trim();
   const cleanVrSearch = normalizeVrLocally(vrNo);
+  const isExplicitBank = entryType === 'Bank' || (vrNo && String(vrNo).trim().endsWith('/B'));
 
   const allTxs = (typeof allTimeGeneralTxList !== 'undefined' && allTimeGeneralTxList.length > 0)
     ? allTimeGeneralTxList
     : (globalRawTransactions || []);
-  const bankTxs = (typeof loadedBankBookTransactions !== 'undefined' && loadedBankBookTransactions) ? loadedBankBookTransactions : [];
+  const bankTxs = (typeof loadedBankBookTransactions !== 'undefined' && loadedBankBookTransactions.length > 0)
+    ? loadedBankBookTransactions
+    : (typeof allTimeBankBookList !== 'undefined' ? allTimeBankBookList : []);
 
   let matchingTxs = [];
+
+  // If explicit Bank request, prioritize Bank transactions
+  if (isExplicitBank) {
+    if (txId) {
+      const byId = bankTxs.find(t => String(t.id) === String(txId) || String(t._docId) === String(txId));
+      if (byId) {
+        if (byId.splitGroupId) {
+          matchingTxs = bankTxs.filter(t => t.splitGroupId === byId.splitGroupId);
+        } else if (cleanVrSearch && cleanVrSearch !== '-') {
+          matchingTxs = bankTxs.filter(t => normalizeVrLocally(t.vrNo) === cleanVrSearch || normalizeVrLocally(t.rcptNo) === cleanVrSearch || normalizeVrLocally(t.payNo) === cleanVrSearch);
+        }
+        if (matchingTxs.length === 0) matchingTxs = [byId];
+      }
+    }
+    if (matchingTxs.length === 0 && cleanVrSearch && cleanVrSearch !== '-') {
+      matchingTxs = bankTxs.filter(t =>
+        normalizeVrLocally(t.vrNo) === cleanVrSearch ||
+        normalizeVrLocally(t.rcptNo) === cleanVrSearch ||
+        normalizeVrLocally(t.payNo) === cleanVrSearch
+      );
+    }
+    if (matchingTxs.length > 0) {
+      openPaymentVoucherModal(matchingTxs);
+      return;
+    }
+  }
+
+  // Otherwise search cash transactions first
   if (cleanVrSearch && cleanVrSearch !== '-') {
     matchingTxs = allTxs.filter(t =>
       normalizeVrLocally(t.vrNo) === cleanVrSearch ||
       normalizeVrLocally(t.rcptNo) === cleanVrSearch ||
       normalizeVrLocally(t.payNo) === cleanVrSearch
     );
-    if (matchingTxs.length === 0) {
+    if (matchingTxs.length === 0 && !isExplicitBank) {
       matchingTxs = bankTxs.filter(t =>
         normalizeVrLocally(t.vrNo) === cleanVrSearch ||
         normalizeVrLocally(t.rcptNo) === cleanVrSearch ||
@@ -7697,26 +10014,32 @@ function openPaymentVoucherModalByVrNo(vrNo, txId) {
 
   let foundTx = null;
   if (targetKey) {
-    foundTx = allTxs.find(t => String(t.id) === targetKey || String(t._docId) === targetKey || String(t.vrNo) === targetKey);
-    if (!foundTx) {
+    if (isExplicitBank) {
       foundTx = bankTxs.find(t => String(t.id) === targetKey || String(t._docId) === targetKey || String(t.vrNo) === targetKey);
+      if (!foundTx) foundTx = allTxs.find(t => String(t.id) === targetKey || String(t._docId) === targetKey || String(t.vrNo) === targetKey);
+    } else {
+      foundTx = allTxs.find(t => String(t.id) === targetKey || String(t._docId) === targetKey || String(t.vrNo) === targetKey);
+      if (!foundTx) foundTx = bankTxs.find(t => String(t.id) === targetKey || String(t._docId) === targetKey || String(t.vrNo) === targetKey);
     }
   }
 
   if (foundTx) {
     openPaymentVoucherModal(foundTx);
   } else {
-    fetchApiData("getEntry", { vrNo: cleanVrSearch || targetKey })
+    fetchApiData("getEntry", { vrNo: cleanVrSearch || targetKey, entryType: isExplicitBank ? 'bank' : undefined })
       .then(res => {
         if (res && res.success && res.found) {
           openPaymentVoucherModal({
             date: res.date,
             vrNo: res.vrNo || targetKey,
             accountName: res.accountName,
+            address: res.address,
+            memberCode: res.memberCode,
             description: res.description,
-            payment: res.payments || res.payment || res.amount,
+            payment: res.payments || res.payment || res.debit || res.amount,
             type: res.type,
-            subtype: res.subtype
+            subtype: res.subtype,
+            entryType: isExplicitBank ? 'Bank' : res.entryType
           });
         } else {
           alert("Payment Voucher #" + (cleanVrSearch || targetKey) + " details not found.");
@@ -7805,19 +10128,7 @@ async function printPaymentVoucherPaper() {
     container.innerHTML = '';
     document.body.classList.remove('print-batch-active');
     document.body.classList.add('print-voucher-active');
-
-    const vrNo = document.getElementById('pVoucherNo') ? document.getElementById('pVoucherNo').innerText.trim() : '';
-    if (vrNo) {
-      globalPrintStatusMap[normalizeVrLocally(vrNo)] = true;
-      renderRecentTransactions();
-      renderBankBookTransactions();
-      const clean = normalizeVrLocally(vrNo);
-      const tx = allTimeGeneralTxList.find(t => normalizeVrLocally(t.vrNo) === clean || normalizeVrLocally(t.rcptNo) === clean || normalizeVrLocally(t.payNo) === clean);
-      if (tx) {
-        tx.printed = true;
-        db.collection("transactions").doc(String(tx.id)).update({ printed: true });
-      }
-    }
+    markTransactionAsPrinted('pVoucherNo');
   }
 
   window.addEventListener('afterprint', cleanup, { once: true });
@@ -8067,11 +10378,11 @@ function openMemberLedgerModal() {
   const mObj = getMemberObject(mName, mAddrTarget);
   const mAddr = (mObj.address || mAddrTarget || activeMembersMap[mName.toLowerCase()] || "Not specified");
 
-  document.getElementById('mLedgerPrintName').innerText = mObj.name;
+  document.getElementById('mLedgerPrintName').innerText = formatMemberDisplayName(mObj.name || mName, mObj.title, true, mObj.nickname);
   document.getElementById('mLedgerPrintAddress').innerText = "📍 Address: " + mAddr;
   document.getElementById('mLedgerPrintDate').innerText = "Date: " + (new Date().toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' }));
 
-  const mTxList = getMemberGroupedTransactions(mName, mAddrTarget);
+  const mTxList = getMemberGroupedTransactions(mName, mAddr);
   let totalContrib = 0;
   const tbody = document.getElementById('mLedgerPrintTbody');
   tbody.innerHTML = '';
@@ -8090,7 +10401,10 @@ function openMemberLedgerModal() {
             <tr style="border-bottom: 1px solid #cbd5e1;">
               <td style="padding: 6px 8px; border-right: 1px solid #cbd5e1; white-space: nowrap;">${formatDateHtml(tx.date)}</td>
               <td style="padding: 6px 8px; border-right: 1px solid #cbd5e1; text-align: center; font-weight: 700;">${cleanVr}</td>
-              <td style="padding: 6px 8px; border-right: 1px solid #cbd5e1;">${tx.description || '-'}</td>
+              <td style="padding: 6px 8px; border-right: 1px solid #cbd5e1;">
+                <div>${tx.description || '-'}</div>
+                ${(tx.address && tx.address !== '-' && tx.address.toLowerCase() !== 'not specified' && tx.address.toLowerCase() !== 'no address') ? `<div style="font-size: 0.68rem; color: #0284c7; margin-top: 2px;">📍 ${tx.address}</div>` : ''}
+              </td>
               <td style="padding: 6px 8px; border-right: 1px solid #cbd5e1;">${categoryName}</td>
               <td style="padding: 6px 8px; text-align: right; font-weight: 700;">${formatPaperCurrency(amt)}</td>
             </tr>
@@ -8149,7 +10463,7 @@ function renderMemberLedgerToCanvas(canvas) {
   const mObj = getMemberObject(mName, mAddrTarget);
   const mAddr = (mObj.address || mAddrTarget || activeMembersMap[mName.toLowerCase()] || "Not specified");
 
-  const mTxList = getMemberGroupedTransactions(mName, mAddrTarget);
+  const mTxList = getMemberGroupedTransactions(mName, mAddr);
 
   const width = 1600;
   const headerHeight = 240;
@@ -8397,7 +10711,8 @@ async function shareMemberLedgerWhatsApp() {
   const mName = selectedMemberName;
   const mAddrTarget = selectedMemberAddress || '';
   const mObj = getMemberObject(mName, mAddrTarget);
-  const mTxList = getMemberGroupedTransactions(mName, mAddrTarget);
+  const mAddr = (mObj.address || mAddrTarget || activeMembersMap[mName.toLowerCase()] || "Not specified");
+  const mTxList = getMemberGroupedTransactions(mName, mAddr);
   let totalContrib = 0;
 
   let txsData = [];
@@ -8428,7 +10743,7 @@ async function shareMemberLedgerWhatsApp() {
   const payload = {
     t: 'l',
     n: mObj.name,
-    addr: mObj.address || mAddrTarget || activeMembersMap[mName.toLowerCase()] || "Not specified",
+    addr: mAddr,
     tot: totalContrib,
     date: new Date().toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' }),
     txs: txsData
@@ -8469,7 +10784,8 @@ async function copyMemberLedgerLink() {
   const mName = selectedMemberName;
   const mAddrTarget = selectedMemberAddress || '';
   const mObj = getMemberObject(mName, mAddrTarget);
-  const mTxList = getMemberGroupedTransactions(mName, mAddrTarget);
+  const mAddr = (mObj.address || mAddrTarget || activeMembersMap[mName.toLowerCase()] || "Not specified");
+  const mTxList = getMemberGroupedTransactions(mName, mAddr);
   let totalContrib = 0;
 
   let txsData = [];
@@ -8670,6 +10986,23 @@ function submitNewMember(event) {
     return;
   }
 
+  const existingDup = (membersDataStore || []).find(m => {
+    if (!m || !m.name) return false;
+    const mn = (m.name || '').toLowerCase().trim();
+    const mr = getRawName(mn).toLowerCase().trim();
+    const ma = (m.address || '').toLowerCase().trim();
+    const cleanA = (address || '').toLowerCase().trim();
+    const matchesName = (mn === name.toLowerCase().trim() || mr === cleanRawName.toLowerCase().trim());
+    if (!matchesName) return false;
+    if (!ma || !cleanA || ma === '-' || cleanA === '-') return true;
+    return ma === cleanA || ma.includes(cleanA) || cleanA.includes(ma);
+  });
+
+  if (existingDup) {
+    alert(`A member named "${formatMemberDisplayName(existingDup.name, existingDup.title)}" with address "${existingDup.address || 'No address'}" is already registered. ⚠️`);
+    return;
+  }
+
   if (btn) {
     btn.disabled = true;
     btn.innerText = "Saving... ⏳";
@@ -8700,14 +11033,15 @@ function submitNewMember(event) {
     if (ok) {
       try {
         showAlert(`✅ Member "${name}" added successfully!`, "success");
-        if (membersDataStore && Array.isArray(membersDataStore)) {
-          if (!membersDataStore.some(m => m && (m.name || '').toLowerCase().trim() === name.toLowerCase().trim() && (m.address || '').toLowerCase().trim() === address.toLowerCase().trim())) {
-            membersDataStore.push(newMember);
-            membersDataStore.sort((a, b) => compareNamesIgnoringPrefix(a.name, b.name));
-            if (name) activeMembersMap[name.toLowerCase()] = address;
-          }
-        }
+        globalRawMembers = globalRawMembers || [];
+        globalRawMembers.push(newMember);
+        membersDataStore = deduplicateMembersList(globalRawMembers);
+        membersDataStore.sort((a, b) => compareNamesIgnoringPrefix(a.name, b.name));
+        _memberCodeCache = null;
+        if (name) activeMembersMap[name.toLowerCase()] = address;
+
         if (typeof filterMembersTabList === 'function') filterMembersTabList();
+        if (typeof renderMembersDirectoryTab === 'function') renderMembersDirectoryTab();
         if (typeof selectMemberLedger === 'function') selectMemberLedger(name, address);
         closeAddMemberModal();
         if (typeof updateEditMemberButtonsVisibility === 'function') updateEditMemberButtonsVisibility();
@@ -8747,14 +11081,11 @@ function populateViewModalData(tx) {
     else if (tx.type === 'Charity') subDisp = ((tx.receipt && tx.receipt > 0) || tx.mode === 'Receipt') ? 'Charity Received' : 'Charity Paid';
   }
   document.getElementById('vSubtype').innerText = subDisp;
-  document.getElementById('vDescription').innerText = tx.description || 'No description entered.';
+  document.getElementById('vDescription').innerText = tx.description || tx.particulars || 'No description entered.';
 
-  const accName = (tx.accountName && tx.accountName !== '-') ? tx.accountName.trim() : '';
-  let memberAddr = tx.address || activeMembersMap[accName.toLowerCase()] || '';
-  if (!memberAddr && accName && membersDataStore.length > 0) {
-    const foundMem = membersDataStore.find(m => m.name && m.name.toLowerCase() === accName.toLowerCase());
-    if (foundMem) memberAddr = foundMem.address || '';
-  }
+  const rawAccName = (tx.accountName && tx.accountName !== '-') ? tx.accountName : ((tx.name && tx.name !== '-') ? tx.name : '');
+  const accName = rawAccName.trim();
+  const memberAddr = resolveMemberAddress(tx) || tx.address || (accName && activeMembersMap[accName.toLowerCase()]) || '';
 
   const addrItem = document.getElementById('vAddressItem');
   if (accName && memberAddr && memberAddr !== '-') {
@@ -8764,8 +11095,14 @@ function populateViewModalData(tx) {
     if (addrItem) addrItem.style.display = 'none';
   }
 
-  const rcptVal = (tx.receipt && tx.receipt > 0) ? formatCurrency(tx.receipt) : '-';
-  const pmtVal = (tx.payment && tx.payment > 0) ? formatCurrency(tx.payment) : (tx.payments && tx.payments > 0 ? formatCurrency(tx.payments) : '-');
+  const isCredit = (tx.receipt && tx.receipt > 0) || (tx.credit && tx.credit > 0) || (tx.mode && (tx.mode.includes('Credit') || tx.mode === 'Receipt'));
+  const isDebit = (tx.payment && tx.payment > 0) || (tx.payments && tx.payments > 0) || (tx.debit && tx.debit > 0) || (tx.mode && (tx.mode.includes('Debit') || tx.mode === 'Payment'));
+
+  const rAmt = Number(tx.receipt || tx.credit || (isCredit ? tx.amount : 0) || 0);
+  const pAmt = Number(tx.payment || tx.payments || tx.debit || (isDebit ? tx.amount : 0) || 0);
+
+  const rcptVal = rAmt > 0 ? formatCurrency(rAmt) : '-';
+  const pmtVal = pAmt > 0 ? formatCurrency(pAmt) : '-';
 
   let balVal = '-';
   if (tx.balance !== undefined && tx.balance !== null && tx.balance !== "" && tx.balance !== "-") {
@@ -8779,8 +11116,8 @@ function populateViewModalData(tx) {
 
   window.currentViewedVrNo = tx.vrNo;
 
-  const hasRcpt = (tx.receipt && tx.receipt > 0) || (tx.type && tx.type.toLowerCase() === 'receipt');
-  const hasPmt = (tx.payment && tx.payment > 0) || (tx.payments && tx.payments > 0) || (tx.type && tx.type.toLowerCase() === 'payment') || (tx.type && tx.type.toLowerCase() === 'ledger');
+  const hasRcpt = rAmt > 0 || (tx.type && tx.type.toLowerCase() === 'receipt') || (tx.mode && tx.mode.toLowerCase().includes('credit'));
+  const hasPmt = pAmt > 0 || (tx.type && tx.type.toLowerCase() === 'payment') || (tx.type && tx.type.toLowerCase() === 'ledger') || (tx.mode && tx.mode.toLowerCase().includes('debit'));
 
   const genRcptBtn = document.getElementById('vGenReceiptBtn');
   if (genRcptBtn) {
@@ -9023,65 +11360,8 @@ function updateTypeOptions(mode, targetTypeValue, targetSubtypeValue) {
   if (targetTypeValue !== undefined) {
     currentVal = targetSubtypeValue ? `${targetTypeValue}|${targetSubtypeValue}` : `${targetTypeValue}|`;
   }
-  typeSelect.innerHTML = '';
   const entryType = document.getElementById('entryType') ? document.getElementById('entryType').value : 'Cash';
-
-  let optionsList = [];
-  const typesList = Object.keys(globalFieldRules);
-
-  typesList.forEach(type => {
-    const rules = globalFieldRules[type];
-    if (typeof isTabApplicableToCurrentFY === 'function' && !isTabApplicableToCurrentFY(rules)) return;
-    if (!rules || !rules.mode) {
-      if (mode === 'Receipt' && !['Subscription', 'Offering', 'Charity', 'Other Income'].includes(type)) return;
-      if (mode === 'Payment' && !['Ledger', 'Charity'].includes(type)) return;
-    } else if (rules.mode !== 'Both' && rules.mode !== mode) {
-      return;
-    }
-
-    let subtypes = subTypesConfig[type] || [];
-    if (type === 'Charity') {
-      subtypes = (mode === 'Receipt') ? [{ name: 'Charity Received', mode: 'Receipt' }] : [{ name: 'Charity Paid', mode: 'Payment' }];
-    }
-
-    if (subtypes.length > 0) {
-      subtypes.forEach(opt => {
-        let stName = (typeof opt === 'string') ? opt : opt.name;
-        const stMode = (typeof opt === 'string') ? 'Both' : (opt.mode || 'Both');
-        if (stMode === 'Both' || stMode === mode) {
-          let displayName = stName;
-          if (type === 'Charity' && !stName.toLowerCase().startsWith('charity')) {
-            displayName = "Charity " + stName;
-            stName = displayName;
-          }
-          optionsList.push({ val: `${type}|${stName}`, text: displayName });
-        }
-      });
-    } else {
-      optionsList.push({ val: `${type}|`, text: type });
-    }
-  });
-  if (entryType === 'Cash') {
-    if (mode === 'Receipt') {
-      optionsList.push({ val: 'Contra|Cash Withdrawal (Contra)', text: 'Cash Withdrawal (Contra)' });
-    } else if (mode === 'Payment') {
-      optionsList.push({ val: 'Contra|Cash Deposit (Contra)', text: 'Cash Deposit (Contra)' });
-    }
-  }
-  optionsList.push({ val: '|', text: '-- None / General --' });
-
-  optionsList.forEach(t => {
-    const opt = document.createElement('option');
-    opt.value = t.val;
-    opt.innerText = t.text;
-    typeSelect.appendChild(opt);
-  });
-
-  if (optionsList.some(t => t.val === currentVal)) {
-    typeSelect.value = currentVal;
-  } else {
-    typeSelect.value = optionsList[0].val;
-  }
+  populateCategorySelect(typeSelect, mode, entryType, currentVal);
 }
 
 // Toggle Voucher logic has been merged into toggleLedgerInput
@@ -9258,11 +11538,8 @@ function setMode(mode) {
     updateBankSubtypes(mode);
     if (accountGroup) {
       const bankSubtype = document.getElementById('bankSubtypeSelect') ? document.getElementById('bankSubtypeSelect').value : '';
-      if (bankSubtype === 'Direct Withdrawal for Member' || bankSubtype === 'Direct Deposit for Member') {
-        accountGroup.style.display = 'block';
-      } else {
-        accountGroup.style.display = 'none';
-      }
+      const isInternal = bankSubtype.includes('Contra') || bankSubtype.includes('Interest') || bankSubtype.includes('Charges');
+      accountGroup.style.display = isInternal ? 'none' : 'block';
     }
   }
 
@@ -9282,12 +11559,21 @@ function setMode(mode) {
       btnOpeningBalance.style.color = 'inherit';
     }
 
-    if (accountGroup) accountGroup.style.display = (entryType === 'Cash') ? 'block' : 'none';
+    if (accountGroup) {
+      if (entryType === 'Bank') {
+        const bankSubtype = document.getElementById('bankSubtypeSelect') ? document.getElementById('bankSubtypeSelect').value : '';
+        const isInternal = bankSubtype.includes('Contra') || bankSubtype.includes('Interest');
+        accountGroup.style.display = isInternal ? 'none' : 'block';
+      } else {
+        accountGroup.style.display = 'block';
+      }
+    }
     if (vrLabelText) vrLabelText.textContent = "🔢 Receipt No ";
     vrBadge.className = "badge badge-receipt";
     vrBadge.innerText = (entryType === 'Bank') ? "Credit" : "Receipt";
     if (vrHint) vrHint.innerText = isEditMode ? "Editing Receipt No" : "Auto Receipt No";
     if (!isEditMode) {
+      if (typeof calculateNextVoucherNumbers === 'function') calculateNextVoucherNumbers();
       vrInput.value = nextReceiptVrNo;
     }
 
@@ -9313,11 +11599,16 @@ function setMode(mode) {
       btnOpeningBalance.style.color = 'inherit';
     }
 
-    if (accountGroup) accountGroup.style.display = 'none';
-    if (!isEditMode) {
-      document.getElementById('accountName').value = "";
-      document.getElementById('addressInput').value = "";
-      document.getElementById('addressPreview').style.display = 'none';
+    if (accountGroup) {
+      if (entryType === 'Bank') {
+        const bankSubtype = document.getElementById('bankSubtypeSelect') ? document.getElementById('bankSubtypeSelect').value : '';
+        const isInternal = bankSubtype.includes('Contra') || bankSubtype.includes('Charges') || bankSubtype.includes('Interest');
+        accountGroup.style.display = isInternal ? 'none' : 'block';
+      } else {
+        const fullTypeVal = document.getElementById('type') ? document.getElementById('type').value : '|';
+        const isCashContra = fullTypeVal.startsWith('Contra');
+        accountGroup.style.display = isCashContra ? 'none' : 'block';
+      }
     }
 
     if (vrLabelText) vrLabelText.textContent = "🔢 Payment Vr. No ";
@@ -9325,6 +11616,7 @@ function setMode(mode) {
     vrBadge.innerText = (entryType === 'Bank') ? "Debit" : "Payment";
     if (vrHint) vrHint.innerText = isEditMode ? "Editing Payment Vr. No" : "Auto Payment Vr. No";
     if (!isEditMode) {
+      if (typeof calculateNextVoucherNumbers === 'function') calculateNextVoucherNumbers();
       vrInput.value = nextPaymentVrNo;
     }
 
@@ -9462,16 +11754,8 @@ function onBankSubtypeChanged() {
   }
 
   if (entryType === 'Bank' && accountGroup) {
-    if (subtype === 'Direct Withdrawal for Member' || subtype === 'Direct Deposit for Member') {
-      accountGroup.style.display = 'block';
-    } else {
-      accountGroup.style.display = 'none';
-      if (!isEditMode) {
-        document.getElementById('accountName').value = "";
-        document.getElementById('addressInput').value = "";
-        document.getElementById('addressPreview').style.display = 'none';
-      }
-    }
+    const isInternal = subtype.includes('Contra') || subtype.includes('Interest') || subtype.includes('Charges');
+    accountGroup.style.display = isInternal ? 'none' : 'block';
   }
 
   if (entryType === 'Bank' && descInput && !isEditMode) {
@@ -9492,8 +11776,49 @@ function onBankSubtypeChanged() {
   const vrContainer = document.getElementById('vrInputContainer');
   const vrInput = document.getElementById('vrNo');
   const vrReq = document.getElementById('vrReq');
+  const vrLabelText = document.getElementById('vrLabelText');
+  const vrBadge = document.getElementById('vrBadge');
+  const contraContainer = document.getElementById('contraNumbersContainer');
+  const contraBankVrInput = document.getElementById('contraBankVrNo');
+  const contraBankVrLabelText = document.getElementById('contraBankVrLabelText');
 
-  if (entryType === 'Bank' && (subtype === 'Cash Deposit (Contra)' || subtype === 'Cash Withdrawal (Contra)' || subtype === 'Bank Interest (Income)' || subtype === 'Inter-Bank Transfer (Contra)' || subtype === 'Bank Charges (Expense)')) {
+  const isContraDeposit = (subtype === 'Cash Deposit (Contra)');
+  const isContraWithdrawal = (subtype === 'Cash Withdrawal (Contra)');
+  const isContra = isContraDeposit || isContraWithdrawal;
+
+  if (entryType === 'Bank' && isContra) {
+    if (vrContainer) vrContainer.style.display = 'block';
+    if (vrInput) vrInput.required = true;
+    if (vrReq) vrReq.style.display = 'inline';
+    if (contraContainer) contraContainer.style.display = 'block';
+
+    if (isContraDeposit) {
+      if (vrLabelText) vrLabelText.textContent = "🔢 Cash Payment Vr. No ";
+      if (vrBadge) { vrBadge.className = "badge badge-payment"; vrBadge.innerText = "Cash Payment"; }
+      if (contraBankVrLabelText) contraBankVrLabelText.textContent = "🏦 Bank Receipt No";
+      if (!isEditMode) {
+        if (vrInput && (vrInput.value === "" || vrInput.value === "undefined" || vrInput.value.includes('/B'))) {
+          vrInput.value = typeof nextPaymentVrNo !== 'undefined' ? nextPaymentVrNo : '';
+        }
+        if (contraBankVrInput && (contraBankVrInput.value === "" || contraBankVrInput.value === "undefined")) {
+          contraBankVrInput.value = (typeof nextReceiptVrNo !== 'undefined' && nextReceiptVrNo) ? `${nextReceiptVrNo}/B` : '';
+        }
+      }
+    } else {
+      if (vrLabelText) vrLabelText.textContent = "🔢 Cash Receipt No ";
+      if (vrBadge) { vrBadge.className = "badge badge-receipt"; vrBadge.innerText = "Cash Receipt"; }
+      if (contraBankVrLabelText) contraBankVrLabelText.textContent = "🏦 Bank Payment Vr. No";
+      if (!isEditMode) {
+        if (vrInput && (vrInput.value === "" || vrInput.value === "undefined" || vrInput.value.includes('/B'))) {
+          vrInput.value = typeof nextReceiptVrNo !== 'undefined' ? nextReceiptVrNo : '';
+        }
+        if (contraBankVrInput && (contraBankVrInput.value === "" || contraBankVrInput.value === "undefined")) {
+          contraBankVrInput.value = (typeof nextPaymentVrNo !== 'undefined' && nextPaymentVrNo) ? `${nextPaymentVrNo}/B` : '';
+        }
+      }
+    }
+  } else if (entryType === 'Bank' && (subtype === 'Bank Interest (Income)' || subtype === 'Inter-Bank Transfer (Contra)' || subtype === 'Bank Charges (Expense)')) {
+    if (contraContainer) contraContainer.style.display = 'none';
     if (vrContainer) vrContainer.style.display = 'none';
     if (vrInput) {
       vrInput.required = false;
@@ -9501,6 +11826,7 @@ function onBankSubtypeChanged() {
     }
     if (vrReq) vrReq.style.display = 'none';
   } else if (entryType === 'Bank') {
+    if (contraContainer) contraContainer.style.display = 'none';
     if (vrContainer) vrContainer.style.display = 'block';
     if (vrInput) {
       vrInput.required = true;
@@ -9530,7 +11856,7 @@ function onTypeChanged() {
 
   const isBankAndCategorize = (entryType === 'Bank' && document.getElementById('isAddLedgerType') && document.getElementById('isAddLedgerType').checked);
   const bankSubtypeStr = entryType === 'Bank' && document.getElementById('bankSubtypeSelect') ? document.getElementById('bankSubtypeSelect').value : '';
-  const isNoVrSubtype = (bankSubtypeStr === 'Cash Deposit (Contra)' || bankSubtypeStr === 'Cash Withdrawal (Contra)' || bankSubtypeStr === 'Bank Interest (Income)' || bankSubtypeStr === 'Inter-Bank Transfer (Contra)' || bankSubtypeStr === 'Bank Charges (Expense)');
+  const isNoVrSubtype = (bankSubtypeStr === 'Bank Interest (Income)' || bankSubtypeStr === 'Inter-Bank Transfer (Contra)' || bankSubtypeStr === 'Bank Charges (Expense)');
 
   if (subTypeGroup) subTypeGroup.style.display = 'none';
 
@@ -9609,7 +11935,15 @@ function onTypeChanged() {
 
   if (entryType === 'Cash') {
     const bankAccountWrapper = document.getElementById('bankAccountWrapper');
-    if (typeVal === 'Contra') {
+    const isCashContra = (typeVal === 'Contra' || (subtypeVal && subtypeVal.includes('(Contra)')));
+    const contraContainer = document.getElementById('contraNumbersContainer');
+    const contraBankVrInput = document.getElementById('contraBankVrNo');
+    const contraBankVrLabelText = document.getElementById('contraBankVrLabelText');
+    const vrLabelText = document.getElementById('vrLabelText');
+    const vrBadge = document.getElementById('vrBadge');
+    const vrInput = document.getElementById('vrNo');
+
+    if (isCashContra) {
       rules = { showAccount: false, showSubtype: false, showMonth: false };
       if (bankAccountWrapper) {
         bankAccountWrapper.style.display = 'flex';
@@ -9618,8 +11952,43 @@ function onTypeChanged() {
           bankAccountWrapper.children[1].style.display = 'none';
         }
       }
+      if (contraContainer) contraContainer.style.display = 'block';
+
+      if (mode === 'Payment') {
+        if (vrLabelText) vrLabelText.textContent = "🔢 Cash Payment Vr. No ";
+        if (vrBadge) { vrBadge.className = "badge badge-payment"; vrBadge.innerText = "Cash Payment"; }
+        if (contraBankVrLabelText) contraBankVrLabelText.textContent = "🏦 Bank Receipt No";
+        if (!isEditMode) {
+          if (vrInput && (vrInput.value === "" || vrInput.value === "undefined" || vrInput.value.includes('/B'))) {
+            vrInput.value = typeof nextPaymentVrNo !== 'undefined' ? nextPaymentVrNo : '';
+          }
+          if (contraBankVrInput && (contraBankVrInput.value === "" || contraBankVrInput.value === "undefined")) {
+            contraBankVrInput.value = (typeof nextReceiptVrNo !== 'undefined' && nextReceiptVrNo) ? `${nextReceiptVrNo}/B` : '';
+          }
+        }
+      } else {
+        if (vrLabelText) vrLabelText.textContent = "🔢 Cash Receipt No ";
+        if (vrBadge) { vrBadge.className = "badge badge-receipt"; vrBadge.innerText = "Cash Receipt"; }
+        if (contraBankVrLabelText) contraBankVrLabelText.textContent = "🏦 Bank Payment Vr. No";
+        if (!isEditMode) {
+          if (vrInput && (vrInput.value === "" || vrInput.value === "undefined" || vrInput.value.includes('/B'))) {
+            vrInput.value = typeof nextReceiptVrNo !== 'undefined' ? nextReceiptVrNo : '';
+          }
+          if (contraBankVrInput && (contraBankVrInput.value === "" || contraBankVrInput.value === "undefined")) {
+            contraBankVrInput.value = (typeof nextPaymentVrNo !== 'undefined' && nextPaymentVrNo) ? `${nextPaymentVrNo}/B` : '';
+          }
+        }
+      }
     } else {
       if (bankAccountWrapper) bankAccountWrapper.style.display = 'none';
+      if (contraContainer) contraContainer.style.display = 'none';
+      if (mode === 'Payment') {
+        if (vrLabelText) vrLabelText.textContent = "🔢 Payment Vr. No ";
+        if (vrBadge) { vrBadge.className = "badge badge-payment"; vrBadge.innerText = "Payment"; }
+      } else {
+        if (vrLabelText) vrLabelText.textContent = "🔢 Receipt No ";
+        if (vrBadge) { vrBadge.className = "badge badge-receipt"; vrBadge.innerText = "Receipt"; }
+      }
     }
   }
 
@@ -9731,18 +12100,29 @@ function autoPopulateDescription() {
   }
 }
 
-function loadEntryForEdit(vrNo, txId) {
+function loadEntryForEdit(vrNo, txId, entryType) {
   switchTab('editTab');
-  document.getElementById('editSearchInput').value = vrNo;
+  const safeVr = (vrNo && vrNo !== '-' && vrNo !== '--') ? vrNo : '';
+  document.getElementById('editSearchInput').value = safeVr;
   if (txId) {
     window._editTargetTxId = txId;
+  }
+  if (entryType) {
+    window._editTargetEntryType = entryType;
+  } else {
+    window._editTargetEntryType = null;
   }
   fetchEntryToEdit();
 }
 
 async function fetchEntryToEdit() {
   const vrVal = document.getElementById('editSearchInput').value.trim();
-  if (!vrVal) {
+  const targetId = window._editTargetTxId || null;
+  const targetEntryType = window._editTargetEntryType || null;
+  window._editTargetTxId = null; // consume it
+  window._editTargetEntryType = null; // consume it
+
+  if (!vrVal && !targetId) {
     alert("Please enter a Voucher Number to search. 🔍");
     return;
   }
@@ -9758,15 +12138,12 @@ async function fetchEntryToEdit() {
     searchBtn.disabled = true;
   }
 
-  const targetId = window._editTargetTxId || null;
-  window._editTargetTxId = null; // consume it
-
   let foundTx = null;
   let matchingTxs = [];
 
   // 1. Direct fresh database query from PostgreSQL
   try {
-    const lookupUrl = `/api/sync/transactions/lookup?vrNo=${encodeURIComponent(vrVal)}${targetId ? `&id=${encodeURIComponent(targetId)}` : ''}`;
+    const lookupUrl = `/api/sync/transactions/lookup?vrNo=${encodeURIComponent(vrVal)}${targetId ? `&id=${encodeURIComponent(targetId)}` : ''}${targetEntryType ? `&entryType=${encodeURIComponent(targetEntryType)}` : ''}`;
     const fetchFn = typeof window !== 'undefined' && window.apiFetch ? window.apiFetch : fetch;
     const resp = await fetchFn(lookupUrl);
     if (resp.ok) {
@@ -9783,20 +12160,22 @@ async function fetchEntryToEdit() {
   // 2. Fallback to in-memory store if DB lookup returned nothing
   if (!foundTx) {
     const cleanVrSearch = normalizeVrLocally(vrVal);
-    if (targetId) {
-      foundTx = allTimeGeneralTxList.find(t => String(t.id) === String(targetId));
-      if (!foundTx) foundTx = loadedBankBookTransactions.find(t => String(t.id) === String(targetId));
-    }
+    const allGen = (typeof allTimeGeneralTxList !== 'undefined' && allTimeGeneralTxList.length > 0) ? allTimeGeneralTxList : [];
+    const allBank = (typeof loadedBankBookTransactions !== 'undefined' && loadedBankBookTransactions.length > 0) ? loadedBankBookTransactions : [];
 
-    if (!foundTx) {
-      foundTx = allTimeGeneralTxList.find(t => normalizeVrLocally(t.vrNo) === cleanVrSearch || normalizeVrLocally(t.rcptNo) === cleanVrSearch || normalizeVrLocally(t.payNo) === cleanVrSearch);
-      if (!foundTx) foundTx = loadedBankBookTransactions.find(t => normalizeVrLocally(t.vrNo) === cleanVrSearch || normalizeVrLocally(t.rcptNo) === cleanVrSearch || normalizeVrLocally(t.payNo) === cleanVrSearch);
+    if (targetEntryType === 'Bank' || (vrVal && vrVal.toLowerCase().endsWith('/b'))) {
+      if (targetId) foundTx = allBank.find(t => String(t.id) === String(targetId));
+      if (!foundTx && cleanVrSearch) foundTx = allBank.find(t => normalizeVrLocally(t.vrNo) === cleanVrSearch || normalizeVrLocally(t.rcptNo) === cleanVrSearch || normalizeVrLocally(t.payNo) === cleanVrSearch);
+    } else {
+      if (targetId) foundTx = allGen.find(t => String(t.id) === String(targetId)) || allBank.find(t => String(t.id) === String(targetId));
+      if (!foundTx && cleanVrSearch) {
+        foundTx = allGen.find(t => normalizeVrLocally(t.vrNo) === cleanVrSearch || normalizeVrLocally(t.rcptNo) === cleanVrSearch || normalizeVrLocally(t.payNo) === cleanVrSearch)
+          || allBank.find(t => normalizeVrLocally(t.vrNo) === cleanVrSearch || normalizeVrLocally(t.rcptNo) === cleanVrSearch || normalizeVrLocally(t.payNo) === cleanVrSearch);
+      }
     }
 
     if (foundTx) {
       const cleanVr = normalizeVrLocally(foundTx.vrNo || foundTx.rcptNo || foundTx.payNo || vrVal);
-      const allGen = (typeof allTimeGeneralTxList !== 'undefined' && allTimeGeneralTxList.length > 0) ? allTimeGeneralTxList : [];
-      const allBank = (typeof loadedBankBookTransactions !== 'undefined' && loadedBankBookTransactions.length > 0) ? loadedBankBookTransactions : [];
 
       if (foundTx.splitGroupId) {
         matchingTxs = allGen.filter(t => t.splitGroupId === foundTx.splitGroupId);
@@ -9831,8 +12210,11 @@ async function fetchEntryToEdit() {
       id: firstTx.id,
       date: firstTx.date,
       vrNo: firstTx.rcptNo || firstTx.payNo || firstTx.vrNo,
-      accountName: firstTx.accountName,
-      address: firstTx.address,
+      accountName: firstTx.accountName || firstTx.account_name || firstTx.name || '',
+      address: firstTx.address || resolveMemberAddress(firstTx) || '',
+      memberCode: firstTx.memberCode || firstTx.member_code || getMemberCode(firstTx.accountName || firstTx.name, firstTx.address),
+      phone: firstTx.phone || '',
+      memberId: firstTx.memberId || firstTx.member_id || null,
       description: firstTx.description || firstTx.particulars,
       amount: firstTx.receipt || firstTx.payment || firstTx.payments || firstTx.amount || "",
       payment: firstTx.payment || firstTx.payments || "",
@@ -9841,8 +12223,8 @@ async function fetchEntryToEdit() {
       subtype: firstTx.subtype || firstTx.category,
       subMonth: firstTx.subMonth,
       entryType: firstTx.entryType || (firstTx.bankAccount ? 'Bank' : 'Cash'),
-      bankAccount: firstTx.bankAccount,
-      bankSubtype: firstTx.bankSubtype,
+      bankAccount: firstTx.bankAccount || firstTx.account,
+      bankSubtype: firstTx.bankSubtype || firstTx.category,
       addToCashBook: firstTx.addToCashBook,
       isCheque: firstTx.isCheque,
       chequeNo: firstTx.chequeNo,
@@ -9861,20 +12243,32 @@ async function fetchEntryToEdit() {
 
 function onEntryFetched(res, vrVal) {
   if (res && res.success && res.found) {
-    // Fix mode for Charity and legacy entries
-    if (res.type === 'Charity' && res.subtype) {
-      const subLower = res.subtype.toLowerCase();
-      if (subLower.includes('paid')) res.mode = 'Payment';
-      else if (subLower.includes('received')) res.mode = 'Receipt';
-    }
-    if (!res.mode) {
-      if (res.payment && Number(res.payment) > 0) res.mode = 'Payment';
-      else res.mode = 'Receipt';
+    const isBank = (res.entryType && String(res.entryType).toLowerCase() === 'bank');
+    const mStr = String(res.mode || '').toLowerCase();
+
+    if (isBank) {
+      if (mStr.includes('credit') || mStr.includes('receipt') || mStr.includes('deposit') || Number(res.credit || res.receipt || 0) > 0) {
+        res.mode = 'Receipt';
+      } else {
+        res.mode = 'Payment';
+      }
+    } else {
+      // Fix mode for Charity and legacy entries
+      if (res.type === 'Charity' && res.subtype) {
+        const subLower = res.subtype.toLowerCase();
+        if (subLower.includes('paid')) res.mode = 'Payment';
+        else if (subLower.includes('received')) res.mode = 'Receipt';
+      }
+      if (!res.mode) {
+        if (res.payment && Number(res.payment) > 0) res.mode = 'Payment';
+        else res.mode = 'Receipt';
+      }
     }
 
     isEditMode = true;
     originalEditVrNo = res.vrNo || vrVal;
     window.originalEditId = res.id;
+    window.originalEditEntryType = res.entryType || (isBank ? "Bank" : "Cash");
     window.originalEditAllTxIds = (res.splitItems || []).map(t => String(t.id));
     window.originalEditSplitGroupId = res.splitGroupId || (res.splitItems && res.splitItems.find(t => t.splitGroupId) ? res.splitItems.find(t => t.splitGroupId).splitGroupId : '');
 
@@ -9898,17 +12292,17 @@ function onEntryFetched(res, vrVal) {
     }
 
     window.originalEditMode = res.mode;
-    window.originalEditEntryType = res.entryType || "Cash";
     window.originalEditType = res.type || "";
     window.originalEditSubtype = res.subtype || "";
     window.originalEditBankSubtype = res.bankSubtype || "";
 
-    setEditEntryType(res.entryType || "Cash");
+    setEditEntryType(res.entryType || (isBank ? "Bank" : "Cash"));
     setEditMode(res.mode || "Receipt");
 
     let displayVr = originalEditVrNo;
-    if (res.entryType && res.entryType.toLowerCase() === 'bank') {
+    if (isBank) {
       displayVr = displayVr.replace(/\/b$/i, '');
+      if (displayVr === '-' || displayVr === '--') displayVr = '';
       if (document.getElementById('edit_bankAccountSelect')) {
         document.getElementById('edit_bankAccountSelect').value = res.bankAccount || "State Bank of India";
       }
@@ -9940,6 +12334,24 @@ function onEntryFetched(res, vrVal) {
     }
 
     document.getElementById('edit_vrNo').value = displayVr;
+
+    const isContraForEdit = (res.type === 'Contra' || res.bankSubtype === 'Cash Deposit (Contra)' || res.bankSubtype === 'Cash Withdrawal (Contra)' || (res.subtype && res.subtype.includes('(Contra)')));
+    const editContraContainer = document.getElementById('edit_contraNumbersContainer');
+    const editContraInput = document.getElementById('edit_contraBankVrNo');
+    const editContraLabel = document.getElementById('edit_contraBankVrLabelText');
+    if (isContraForEdit) {
+      if (editContraContainer) editContraContainer.style.display = 'block';
+      const isDeposit = (res.bankSubtype === 'Cash Deposit (Contra)' || (res.subtype && res.subtype.includes('Deposit')));
+      if (editContraLabel) {
+        editContraLabel.textContent = isDeposit ? "🏦 Bank Receipt No" : "🏦 Bank Payment Vr. No";
+      }
+      if (editContraInput) {
+        editContraInput.value = res.contra_vr_no || res.contraVrNo || res.bank_vr_no || res.bankVrNo || res.cash_vr_no || res.cashVrNo || '';
+      }
+    } else {
+      if (editContraContainer) editContraContainer.style.display = 'none';
+      if (editContraInput) editContraInput.value = '';
+    }
 
     // Restore Cheque Fields
     if (res.isCheque || (res.chequeNo && String(res.chequeNo).trim() !== '')) {
@@ -10115,9 +12527,11 @@ function setEntryType(type) {
     const typeSelect = document.getElementById('type');
     if (typeSelect) {
       if (mode === 'Receipt') {
-        typeSelect.value = 'Subscription';
+        const subOpt = Array.from(typeSelect.options).find(o => o.value.startsWith('Subscription'));
+        if (subOpt) typeSelect.value = subOpt.value;
       } else {
-        typeSelect.value = 'Ledger';
+        const ledgOpt = Array.from(typeSelect.options).find(o => o.value.startsWith('Ledger'));
+        if (ledgOpt) typeSelect.value = ledgOpt.value;
       }
     }
     onTypeChanged();
@@ -10267,18 +12681,31 @@ function handleFormSubmit(e) {
   const fullTypeVal = document.getElementById('type') ? document.getElementById('type').value : '|';
   const [parsedType, parsedSubtype] = fullTypeVal.split('|');
 
+  const contraBankVrInput = document.getElementById('contraBankVrNo');
+  const contraBankVrVal = contraBankVrInput ? contraBankVrInput.value.trim() : '';
+
   const formPayload = {
     action: isEditMode ? "edit" : "add",
     originalVrNo: isEditMode ? originalEditVrNo : document.getElementById('vrNo').value,
     date: document.getElementById('date').value,
     vrNo: vrNoValue,
+    contraVrNo: contraBankVrVal,
+    contra_vr_no: contraBankVrVal,
+    bankVrNo: contraBankVrVal,
     accountName: document.getElementById('accountName').value,
     address: document.getElementById('addressInput').value,
     description: document.getElementById('description').value,
     receipt: formReceipt,
     payment: formPayments,
-    type: (entryTypeVal === 'Bank' && !(document.getElementById('isAddLedgerType') && document.getElementById('isAddLedgerType').checked)) ? "" : parsedType,
-    subtype: (entryTypeVal === 'Bank' && !(document.getElementById('isAddLedgerType') && document.getElementById('isAddLedgerType').checked)) ? "" : (parsedSubtype || ""),
+    type: (entryTypeVal === 'Bank' && !(document.getElementById('isAddLedgerType') && document.getElementById('isAddLedgerType').checked)) 
+      ? (bankSubtypeStr.includes('Interest') ? 'Bank Interest (Income)' : (bankSubtypeStr.includes('Contra') ? 'Contra' : (bankSubtypeStr || 'Bank'))) 
+      : parsedType,
+    subtype: (entryTypeVal === 'Bank' && !(document.getElementById('isAddLedgerType') && document.getElementById('isAddLedgerType').checked)) 
+      ? (bankSubtypeStr || "") 
+      : (parsedSubtype || ""),
+    category: ((entryTypeVal === 'Bank' && !(document.getElementById('isAddLedgerType') && document.getElementById('isAddLedgerType').checked)) 
+      ? (bankSubtypeStr || 'Bank') 
+      : (parsedType === 'Ledger' && parsedSubtype ? parsedSubtype : (parsedSubtype || parsedType || 'General'))),
     subMonth: (entryTypeVal === 'Bank' && !(document.getElementById('isAddLedgerType') && document.getElementById('isAddLedgerType').checked)) ? "" : (document.getElementById('subMonth') ? document.getElementById('subMonth').value : ""),
     entryType: document.getElementById('entryType').value,
     bankAccount: document.getElementById('bankAccountSelect') ? document.getElementById('bankAccountSelect').value : "State Bank of India",
@@ -10353,19 +12780,47 @@ function handleFormSubmit(e) {
     }
 
     const isCredit = bankMode.includes('Credit') || bankMode.includes('Receipt');
+    const accName = formPayload.accountName || '';
+    const memAddr = formPayload.address || '';
+    const memObj = getMemberObject(accName, memAddr);
+    const resolvedCode = getMemberCode(accName, memAddr);
+    const resolvedAddress = memAddr || memObj.address || '';
+    const resolvedPhone = memObj.phone || '';
+    const resolvedMemberId = memObj.id || null;
+
     const bankPayload = {
       id: newId,
       date: formPayload.date,
-      vrNo: formPayload.vrNo || '-',
+      vrNo: isContraEntry ? (contraBankVrVal || (formPayload.vrNo ? `${formPayload.vrNo}/B` : '-')) : (formPayload.vrNo || '-'),
+      voucher_no: isContraEntry ? (contraBankVrVal || (formPayload.vrNo ? `${formPayload.vrNo}/B` : '-')) : (formPayload.vrNo || '-'),
+      contraVrNo: formPayload.vrNo,
+      contra_vr_no: formPayload.vrNo,
+      cashVrNo: formPayload.vrNo,
+      cash_vr_no: formPayload.vrNo,
+      accountName: accName,
+      account_name: accName,
+      name: accName,
+      memberCode: (resolvedCode && resolvedCode !== '-') ? resolvedCode : '',
+      member_code: (resolvedCode && resolvedCode !== '-') ? resolvedCode : '',
+      address: resolvedAddress,
+      phone: resolvedPhone,
+      memberId: resolvedMemberId,
+      member_id: resolvedMemberId,
       description: formPayload.accountName && formPayload.description ? formPayload.accountName + " - " + formPayload.description : (formPayload.accountName || formPayload.description || '-'),
+      particulars: formPayload.description || formPayload.accountName || '-',
       amount: amountVal,
       receipt: isCredit ? amountVal : "",
       payment: !isCredit ? amountVal : "",
       credit: isCredit ? amountVal : 0,
       debit: !isCredit ? amountVal : 0,
       account: formPayload.bankAccount,
+      bankAccount: formPayload.bankAccount,
       mode: bankMode,
       bankSubtype: bSubtype,
+      category: formPayload.category || bSubtype || (bSubtype.includes('Interest') ? 'Bank Interest (Income)' : 'Bank'),
+      subtype: formPayload.subtype || bSubtype || '',
+      type: formPayload.type || (bSubtype.includes('Interest') ? 'Bank Interest (Income)' : 'Bank'),
+      subMonth: formPayload.subMonth || '',
       inCashBook: isContraEntry ? true : (formPayload.addToCashBook === true),
       addToCashBook: isContraEntry ? true : (formPayload.addToCashBook === true),
       entryType: "Bank",
@@ -10449,16 +12904,24 @@ function handleFormSubmit(e) {
       const skipTypes = ['offering', 'offertory', ''];
       const typeStr = (formPayload.type || '').toLowerCase();
       if (newAccName && newAccName !== '-' && !skipTypes.some(s => s && typeStr.includes(s))) {
-        const alreadyExists = (membersDataStore || []).some(m =>
-          (m.name || '').toLowerCase() === newAccName.toLowerCase()
-        );
-        if (!alreadyExists) {
+        const rawNew = getRawName(newAccName).toLowerCase().trim();
+        const alreadyExists = (membersDataStore || []).some(m => {
+          if (!m || !m.name) return false;
+          const mn = (m.name || '').toLowerCase().trim();
+          const mr = getRawName(mn).toLowerCase().trim();
+          return mn === newAccName.toLowerCase().trim() || mr === rawNew || (m._aliases && m._aliases.includes(newAccName.toLowerCase().trim()));
+        });
+        if (!alreadyExists && rawNew) {
           const newMember = { name: newAccName, address: formPayload.address || 'Thadiyoor' };
-          db.collection("members").add(newMember).then(() => {
-            membersDataStore = membersDataStore || [];
-            membersDataStore.push(newMember);
+          db.collection("members").add(newMember).then((docRef) => {
+            newMember._docId = docRef.id;
+            newMember.id = docRef.id;
+            globalRawMembers.push(newMember);
+            membersDataStore = deduplicateMembersList(globalRawMembers);
             membersDataStore.sort((a, b) => compareNamesIgnoringPrefix(a.name, b.name));
+            _memberCodeCache = null;
             if (typeof filterMembersTabList === 'function') filterMembersTabList();
+            if (typeof renderMembersDirectoryTab === 'function') renderMembersDirectoryTab();
           }).catch(err => console.warn("⚠️ Could not auto-add member:", err));
         }
       }
@@ -10526,11 +12989,22 @@ function onSubmitSuccess(res, mode, savedTx) {
         }
       }
 
+      const submittedContraVr = savedTx ? (extractBaseNum(savedTx.contraVrNo || savedTx.contra_vr_no) || 0) : 0;
+      if (submittedContraVr > 0 && submittedContraVr < 100000) {
+        if (mode === 'Receipt') {
+          if (submittedContraVr >= nextPaymentVrNo) nextPaymentVrNo = submittedContraVr + 1;
+        } else {
+          if (submittedContraVr >= nextReceiptVrNo) nextReceiptVrNo = submittedContraVr + 1;
+        }
+      }
+
       document.getElementById('accountName').value = "";
       document.getElementById('addressInput').value = "";
       document.getElementById('addressPreview').style.display = "none";
       document.getElementById('amount').value = "";
       document.getElementById('description').value = "";
+      if (document.getElementById('contraBankVrNo')) document.getElementById('contraBankVrNo').value = "";
+      if (document.getElementById('contraNumbersContainer')) document.getElementById('contraNumbersContainer').style.display = "none";
 
       // Reset toggles and dropdowns to default states
       if (document.getElementById('isCheque')) {
@@ -10625,7 +13099,8 @@ let editTabSubTypesConfig = {
 };
 
 function setEditMode(mode) {
-  const isReceipt = (mode && mode.toLowerCase() === 'receipt');
+  const mLower = String(mode || '').toLowerCase();
+  const isReceipt = (mLower === 'receipt' || mLower.includes('credit') || mLower.includes('deposit'));
   document.getElementById('edit_txType').value = isReceipt ? 'Receipt' : 'Payment';
 
   const formCard = document.getElementById('editFormCard');
@@ -10645,10 +13120,11 @@ function setEditMode(mode) {
     else formCard.classList.add('payment-active');
   }
 
-  if (mode === 'Payment') {
-    updateEditTypeOptions(mode, 'Ledger', 'General Expenses');
+  const effectiveMode = isReceipt ? 'Receipt' : 'Payment';
+  if (effectiveMode === 'Payment') {
+    updateEditTypeOptions('Payment', 'Ledger', 'General Expenses');
   } else {
-    updateEditTypeOptions(mode);
+    updateEditTypeOptions('Receipt');
   }
   const entryType = document.getElementById('edit_entryType') ? document.getElementById('edit_entryType').value : 'Cash';
 
@@ -10661,15 +13137,12 @@ function setEditMode(mode) {
   }
 
   if (entryType === 'Bank') {
-    updateEditBankSubtypes(mode);
+    updateEditBankSubtypes(effectiveMode);
     const editAccountGroup = document.getElementById('edit_accountGroup');
     if (editAccountGroup) {
       const bankSubtype = document.getElementById('edit_bankSubtypeSelect') ? document.getElementById('edit_bankSubtypeSelect').value : '';
-      if (bankSubtype === 'Direct Withdrawal for Member' || bankSubtype === 'Direct Deposit for Member') {
-        editAccountGroup.style.display = 'block';
-      } else {
-        editAccountGroup.style.display = 'none';
-      }
+      const isInternal = bankSubtype.includes('Contra') || bankSubtype.includes('Interest') || bankSubtype.includes('Charges');
+      editAccountGroup.style.display = isInternal ? 'none' : 'block';
     }
   }
 
@@ -10680,10 +13153,21 @@ function setEditMode(mode) {
     if (suffixSpan) suffixSpan.style.display = 'none';
   }
 
+  if (accountGroup) {
+    if (entryType === 'Bank') {
+      const bankSubtype = document.getElementById('edit_bankSubtypeSelect') ? document.getElementById('edit_bankSubtypeSelect').value : '';
+      const isInternal = bankSubtype.includes('Contra') || bankSubtype.includes('Interest') || bankSubtype.includes('Charges');
+      accountGroup.style.display = isInternal ? 'none' : 'block';
+    } else {
+      const fullTypeVal = document.getElementById('edit_type') ? document.getElementById('edit_type').value : '|';
+      const isCashContra = fullTypeVal.startsWith('Contra');
+      accountGroup.style.display = isCashContra ? 'none' : 'block';
+    }
+  }
+
   if (isReceipt) {
     btnReceipt.classList.add('active');
     btnPayment.classList.remove('active');
-    if (accountGroup) accountGroup.style.display = (entryType === 'Cash') ? 'block' : 'none';
     if (editVrLabelText) editVrLabelText.textContent = "🔢 Receipt No ";
     vrBadge.className = "badge badge-receipt";
     vrBadge.innerText = (entryType === 'Bank') ? "Credit" : "Receipt";
@@ -10695,7 +13179,6 @@ function setEditMode(mode) {
   } else {
     btnPayment.classList.add('active');
     btnReceipt.classList.remove('active');
-    if (accountGroup) accountGroup.style.display = 'none';
     if (editVrLabelText) editVrLabelText.textContent = "🔢 Payment Vr. No ";
     vrBadge.className = "badge badge-payment";
     vrBadge.innerText = (entryType === 'Bank') ? "Debit" : "Payment";
@@ -10753,6 +13236,9 @@ function setEditEntryType(type) {
 
     toggleEditLedgerInput(document.getElementById('edit_isAddLedgerType') ? document.getElementById('edit_isAddLedgerType').checked : false);
 
+    if (document.getElementById('edit_vrNo')) document.getElementById('edit_vrNo').required = false;
+    if (document.getElementById('edit_vrReq')) document.getElementById('edit_vrReq').style.display = 'none';
+
     btnReceipt.innerHTML = '🟢 Credit (Money In)';
     btnPayment.innerHTML = '🔴 Debit (Money Out)';
     const editTransactionIdContainer = document.getElementById('edit_transactionIdContainer');
@@ -10762,7 +13248,7 @@ function setEditEntryType(type) {
   const mode = document.getElementById('edit_txType') ? document.getElementById('edit_txType').value : 'Receipt';
   setEditMode(mode);
 
-  if (!isBank) {
+  if (!isBank && !isEditMode) {
     const typeSelect = document.getElementById('edit_type');
     if (typeSelect) {
       if (mode.toLowerCase() === 'receipt') {
@@ -10852,24 +13338,47 @@ function onEditBankSubtypeChanged() {
   }
 
   if (entryType === 'Bank' && accountGroup) {
-    if (subtype === 'Direct Withdrawal for Member' || subtype === 'Direct Deposit for Member') {
-      accountGroup.style.display = 'block';
-    } else {
-      accountGroup.style.display = 'none';
-    }
+    const isInternal = subtype.includes('Contra') || subtype.includes('Interest') || subtype.includes('Charges');
+    accountGroup.style.display = isInternal ? 'none' : 'block';
   }
 
   const editVrContainer = document.getElementById('edit_vrInputContainer');
   const editVrInput = document.getElementById('edit_vrNo');
   const editVrReq = document.getElementById('edit_vrReq');
+  const editVrLabelText = document.getElementById('edit_vrLabelText');
+  const editVrBadge = document.getElementById('edit_vrBadge');
+  const editContraContainer = document.getElementById('edit_contraNumbersContainer');
+  const editContraInput = document.getElementById('edit_contraBankVrNo');
+  const editContraLabel = document.getElementById('edit_contraBankVrLabelText');
 
-  if (entryType === 'Bank' && (subtype === 'Cash Deposit (Contra)' || subtype === 'Cash Withdrawal (Contra)' || subtype === 'Bank Interest (Income)' || subtype === 'Inter-Bank Transfer (Contra)' || subtype === 'Bank Charges (Expense)')) {
+  const isContraDeposit = (subtype === 'Cash Deposit (Contra)');
+  const isContraWithdrawal = (subtype === 'Cash Withdrawal (Contra)');
+  const isContra = isContraDeposit || isContraWithdrawal;
+
+  if (entryType === 'Bank' && isContra) {
+    if (editVrContainer) editVrContainer.style.display = 'block';
+    if (editVrInput) editVrInput.required = true;
+    if (editVrReq) editVrReq.style.display = 'inline';
+    if (editContraContainer) editContraContainer.style.display = 'block';
+
+    if (isContraDeposit) {
+      if (editVrLabelText) editVrLabelText.textContent = "🔢 Cash Payment Vr. No ";
+      if (editVrBadge) { editVrBadge.className = "badge badge-payment"; editVrBadge.innerText = "Cash Payment"; }
+      if (editContraLabel) editContraLabel.textContent = "🏦 Bank Receipt No";
+    } else {
+      if (editVrLabelText) editVrLabelText.textContent = "🔢 Cash Receipt No ";
+      if (editVrBadge) { editVrBadge.className = "badge badge-receipt"; editVrBadge.innerText = "Cash Receipt"; }
+      if (editContraLabel) editContraLabel.textContent = "🏦 Bank Payment Vr. No";
+    }
+  } else if (entryType === 'Bank' && (subtype === 'Bank Interest (Income)' || subtype === 'Inter-Bank Transfer (Contra)' || subtype === 'Bank Charges (Expense)')) {
+    if (editContraContainer) editContraContainer.style.display = 'none';
     if (editVrContainer) editVrContainer.style.display = 'none';
     if (editVrInput) {
       editVrInput.required = false;
     }
     if (editVrReq) editVrReq.style.display = 'none';
   } else if (entryType === 'Bank') {
+    if (editContraContainer) editContraContainer.style.display = 'none';
     if (editVrContainer) editVrContainer.style.display = 'block';
     if (editVrInput) {
       editVrInput.required = true;
@@ -10890,70 +13399,8 @@ function updateEditTypeOptions(mode, targetTypeValue, targetSubtypeValue) {
   if (targetTypeValue !== undefined) {
     currentVal = targetSubtypeValue ? `${targetTypeValue}|${targetSubtypeValue}` : `${targetTypeValue}|`;
   }
-  typeSelect.innerHTML = '';
   const entryType = document.getElementById('edit_entryType') ? document.getElementById('edit_entryType').value : 'Cash';
-
-  let optionsList = [];
-  const typesList = Object.keys(globalFieldRules);
-
-  typesList.forEach(type => {
-    const rules = globalFieldRules[type];
-    if (!rules || !rules.mode) {
-      if (mode === 'Receipt' && !['Subscription', 'Offering', 'Charity', 'Other Income'].includes(type)) return;
-      if (mode === 'Payment' && !['Ledger', 'Charity'].includes(type)) return;
-    } else if (rules.mode !== 'Both' && rules.mode !== mode) {
-      return;
-    }
-
-    let subtypes = subTypesConfig[type] || [];
-    if (type === 'Charity') {
-      subtypes = (mode === 'Receipt') ? [{ name: 'Charity Received', mode: 'Receipt' }] : [{ name: 'Charity Paid', mode: 'Payment' }];
-    }
-
-    if (subtypes.length > 0) {
-      subtypes.forEach(opt => {
-        let stName = (typeof opt === 'string') ? opt : opt.name;
-        const stMode = (typeof opt === 'string') ? 'Both' : (opt.mode || 'Both');
-        if (stMode === 'Both' || stMode === mode) {
-          let displayName = stName;
-          if (type === 'Charity' && !stName.toLowerCase().startsWith('charity')) {
-            displayName = "Charity " + stName;
-            stName = displayName;
-          }
-          optionsList.push({ val: `${type}|${stName}`, text: displayName });
-        }
-      });
-    } else {
-      optionsList.push({ val: `${type}|`, text: type });
-    }
-  });
-  if (entryType === 'Cash') {
-    if (mode === 'Receipt') {
-      optionsList.push({ val: 'Contra|Cash Withdrawal (Contra)', text: 'Cash Withdrawal (Contra)' });
-    } else if (mode === 'Payment') {
-      optionsList.push({ val: 'Contra|Cash Deposit (Contra)', text: 'Cash Deposit (Contra)' });
-    }
-  }
-  optionsList.push({ val: '|', text: '-- None / General --' });
-
-  optionsList.forEach(t => {
-    const opt = document.createElement('option');
-    opt.value = t.val;
-    opt.innerText = t.text;
-    typeSelect.appendChild(opt);
-  });
-
-  if (optionsList.some(t => t.val === currentVal)) {
-    typeSelect.value = currentVal;
-  } else {
-    const typeOnly = currentVal.split('|')[0];
-    const partialMatch = typeOnly ? optionsList.find(t => t.val.startsWith(typeOnly + '|')) : null;
-    if (partialMatch) {
-      typeSelect.value = partialMatch.val;
-    } else {
-      typeSelect.value = optionsList[0].val;
-    }
-  }
+  populateCategorySelect(typeSelect, mode, entryType, currentVal);
 }
 
 function checkTypeChangeWarning() {
@@ -11033,7 +13480,13 @@ function onEditTypeChanged() {
 
   if (entryType === 'Cash') {
     const editBankAccountWrapper = document.getElementById('edit_bankAccountWrapper');
-    if (typeVal === 'Contra') {
+    const isEditContra = (typeVal === 'Contra' || (subtypeVal && subtypeVal.includes('(Contra)')));
+    const editContraContainer = document.getElementById('edit_contraNumbersContainer');
+    const editContraLabel = document.getElementById('edit_contraBankVrLabelText');
+    const editVrLabelText = document.getElementById('edit_vrLabelText');
+    const editVrBadge = document.getElementById('edit_vrBadge');
+
+    if (isEditContra) {
       rules = { showAccount: false, showSubtype: false, showMonth: false };
       if (editBankAccountWrapper) {
         editBankAccountWrapper.style.display = 'flex';
@@ -11042,8 +13495,27 @@ function onEditTypeChanged() {
           editBankAccountWrapper.children[1].style.display = 'none';
         }
       }
+      if (editContraContainer) editContraContainer.style.display = 'block';
+
+      if (mode === 'Payment') {
+        if (editVrLabelText) editVrLabelText.textContent = "🔢 Cash Payment Vr. No ";
+        if (editVrBadge) { editVrBadge.className = "badge badge-payment"; editVrBadge.innerText = "Cash Payment"; }
+        if (editContraLabel) editContraLabel.textContent = "🏦 Bank Receipt No";
+      } else {
+        if (editVrLabelText) editVrLabelText.textContent = "🔢 Cash Receipt No ";
+        if (editVrBadge) { editVrBadge.className = "badge badge-receipt"; editVrBadge.innerText = "Cash Receipt"; }
+        if (editContraLabel) editContraLabel.textContent = "🏦 Bank Payment Vr. No";
+      }
     } else {
       if (editBankAccountWrapper) editBankAccountWrapper.style.display = 'none';
+      if (editContraContainer) editContraContainer.style.display = 'none';
+      if (mode === 'Payment') {
+        if (editVrLabelText) editVrLabelText.textContent = "🔢 Payment Vr. No ";
+        if (editVrBadge) { editVrBadge.className = "badge badge-payment"; editVrBadge.innerText = "Payment"; }
+      } else {
+        if (editVrLabelText) editVrLabelText.textContent = "🔢 Receipt No ";
+        if (editVrBadge) { editVrBadge.className = "badge badge-receipt"; editVrBadge.innerText = "Receipt"; }
+      }
     }
   }
 
@@ -11374,48 +13846,42 @@ function toggleEditSplitEntryMode() {
 }
 
 function getCategoryOptionsHTML(mode = 'Receipt') {
-  let optionsList = [];
-  const typesList = Object.keys(globalFieldRules);
-
-  typesList.forEach(type => {
-    const rules = globalFieldRules[type];
-    if (!rules || !rules.mode) {
-      if (mode === 'Receipt' && !['Subscription', 'Offering', 'Charity', 'Other Income'].includes(type)) return;
-      if (mode === 'Payment' && !['Ledger', 'Charity'].includes(type)) return;
-    } else if (rules.mode !== 'Both' && rules.mode !== mode) {
-      return;
-    }
-
-    let subtypes = (typeof subTypesConfig !== 'undefined' && subTypesConfig[type]) ? subTypesConfig[type] : [];
-    if (type === 'Charity') {
-      subtypes = (mode === 'Receipt') ? [{ name: 'Charity Received', mode: 'Receipt' }] : [{ name: 'Charity Paid', mode: 'Payment' }];
-    }
-
-    if (subtypes.length > 0) {
-      subtypes.forEach(opt => {
-        let stName = (typeof opt === 'string') ? opt : opt.name;
-        const stMode = (typeof opt === 'string') ? 'Both' : (opt.mode || 'Both');
-        if (stMode === 'Both' || stMode === mode) {
-          let displayName = stName;
-          if (type === 'Charity' && !stName.toLowerCase().startsWith('charity')) {
-            displayName = "Charity " + stName;
-            stName = displayName;
-          }
-          optionsList.push({ val: `${type}|${stName}`, text: displayName });
-        }
-      });
-    } else {
-      optionsList.push({ val: `${type}|`, text: type });
-    }
+  const optionsList = buildCategoryOptionsFromDatabase(mode, 'Cash');
+  const groups = {};
+  optionsList.forEach(opt => {
+    const grp = opt.group || 'Other';
+    if (!groups[grp]) groups[grp] = [];
+    groups[grp].push(opt);
   });
 
-  if (mode === 'Receipt') {
-    optionsList.push({ val: 'Contra|Cash Withdrawal (Contra)', text: 'Cash Withdrawal (Contra)' });
-  } else if (mode === 'Payment') {
-    optionsList.push({ val: 'Contra|Cash Deposit (Contra)', text: 'Cash Deposit (Contra)' });
-  }
+  const preferredGroupOrder = (mode === 'Payment')
+    ? ['Ledger', 'Monthly Meeting', 'Charity', 'Contra', 'General']
+    : ['Subscription', 'Offering', 'Other Income', 'Monthly Meeting', 'Charity', 'Contra', 'General'];
 
-  return optionsList.map(t => `<option value="${t.val}">${t.text}</option>`).join('\n');
+  const groupKeys = Object.keys(groups).sort((a, b) => {
+    const idxA = preferredGroupOrder.indexOf(a);
+    const idxB = preferredGroupOrder.indexOf(b);
+    if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+    if (idxA !== -1) return -1;
+    if (idxB !== -1) return 1;
+    return a.localeCompare(b);
+  });
+
+  let html = '';
+  groupKeys.forEach(grp => {
+    const grpItems = groups[grp];
+    grpItems.sort((a, b) => a.text.localeCompare(b.text));
+    if (grpItems.length === 1 && (grp === 'General' || grp === 'Subscription' || grp === 'Offering')) {
+      html += `<option value="${grpItems[0].val}">${grpItems[0].text}</option>\n`;
+    } else {
+      html += `<optgroup label="${grp}">\n`;
+      grpItems.forEach(item => {
+        html += `  <option value="${item.val}">${item.text}</option>\n`;
+      });
+      html += `</optgroup>\n`;
+    }
+  });
+  return html;
 }
 
 let editSplitRowCount = 0;
@@ -11621,10 +14087,12 @@ function handleEditFormSubmit(e) {
     vrNoValue = chequeNo;
   }
 
-  if (entryTypeVal === 'Bank' && vrNoValue !== "") {
+  if (entryTypeVal === 'Bank' && vrNoValue !== "" && vrNoValue !== '-' && vrNoValue !== '--') {
     if (!vrNoValue.endsWith('/B')) {
       vrNoValue = vrNoValue + '/B';
     }
+  } else if (entryTypeVal === 'Bank' && (vrNoValue === "" || vrNoValue === '-' || vrNoValue === '--')) {
+    vrNoValue = '--';
   }
 
   let formReceipt = (mode === 'Receipt') ? amountVal : "";
@@ -11633,29 +14101,70 @@ function handleEditFormSubmit(e) {
   const bankSubtypeStr = document.getElementById('edit_bankSubtypeSelect') ? document.getElementById('edit_bankSubtypeSelect').value : "";
   if (entryTypeVal === 'Bank') {
     if (bankSubtypeStr === 'Cash Deposit (Contra)') {
-      formReceipt = "";
-      formPayments = amountVal;
-    } else if (bankSubtypeStr === 'Cash Withdrawal (Contra)') {
       formReceipt = amountVal;
       formPayments = "";
+    } else if (bankSubtypeStr === 'Cash Withdrawal (Contra)') {
+      formReceipt = "";
+      formPayments = amountVal;
     }
   }
 
   const fullTypeVal = document.getElementById('edit_type') ? document.getElementById('edit_type').value : '|';
   const [parsedType, parsedSubtype] = fullTypeVal.split('|');
 
+  let chosenSubtype = parsedSubtype || '';
+  const editSubtypeEl = document.getElementById('edit_subtype');
+  if (!chosenSubtype && editSubtypeEl && editSubtypeEl.offsetParent !== null && editSubtypeEl.value) {
+    chosenSubtype = editSubtypeEl.value.trim();
+  }
+
+  const isAddLedgerEdit = (document.getElementById('edit_isAddLedgerType') && document.getElementById('edit_isAddLedgerType').checked);
+  const effectiveType = (entryTypeVal === 'Bank' && !isAddLedgerEdit) 
+    ? (bankSubtypeStr.includes('Interest') ? 'Bank Interest (Income)' : (bankSubtypeStr.includes('Contra') ? 'Contra' : (bankSubtypeStr || 'Bank'))) 
+    : parsedType;
+  const effectiveSubtype = (entryTypeVal === 'Bank' && !isAddLedgerEdit) 
+    ? (bankSubtypeStr || "") 
+    : chosenSubtype;
+  const effectiveCategory = (entryTypeVal === 'Bank' && !isAddLedgerEdit)
+    ? (bankSubtypeStr || 'Bank')
+    : ((effectiveType === 'Ledger' && effectiveSubtype) ? effectiveSubtype : (effectiveSubtype || effectiveType || 'General'));
+
+  const editContraBankVrInput = document.getElementById('edit_contraBankVrNo');
+  const editContraBankVrVal = editContraBankVrInput ? editContraBankVrInput.value.trim() : '';
+
+  const editAccVal = (document.getElementById('edit_accountName') ? document.getElementById('edit_accountName').value : '').trim();
+  const editAddrVal = (document.getElementById('edit_addressInput') ? document.getElementById('edit_addressInput').value : '').trim();
+  const editMemObj = getMemberObject(editAccVal, editAddrVal);
+  const editResolvedCode = getMemberCode(editAccVal, editAddrVal);
+  const editResolvedAddress = editAddrVal || editMemObj.address || '';
+  const editResolvedPhone = editMemObj.phone || '';
+  const editResolvedMemberId = editMemObj.id || null;
+
   const formPayload = {
     action: "edit",
     originalVrNo: originalEditVrNo,
     date: document.getElementById('edit_date').value,
     vrNo: vrNoValue,
-    accountName: document.getElementById('edit_accountName').value,
-    address: document.getElementById('edit_addressInput').value,
+    contraVrNo: editContraBankVrVal,
+    contra_vr_no: editContraBankVrVal,
+    bankVrNo: editContraBankVrVal,
+    accountName: editAccVal,
+    account_name: editAccVal,
+    name: editAccVal,
+    address: editResolvedAddress,
+    phone: editResolvedPhone,
+    memberCode: (editResolvedCode && editResolvedCode !== '-') ? editResolvedCode : '',
+    member_code: (editResolvedCode && editResolvedCode !== '-') ? editResolvedCode : '',
+    memberId: editResolvedMemberId,
+    member_id: editResolvedMemberId,
     description: document.getElementById('edit_description').value,
+    amount: amountVal,
     receipt: formReceipt,
     payment: formPayments,
-    type: (entryTypeVal === 'Bank' && !(document.getElementById('edit_isAddLedgerType') && document.getElementById('edit_isAddLedgerType').checked)) ? "" : parsedType,
-    subtype: (entryTypeVal === 'Bank' && !(document.getElementById('edit_isAddLedgerType') && document.getElementById('edit_isAddLedgerType').checked)) ? "" : (parsedSubtype || ""),
+    type: effectiveType,
+    subtype: effectiveSubtype,
+    subType: effectiveSubtype,
+    category: effectiveCategory,
     subMonth: (entryTypeVal === 'Bank' && !(document.getElementById('edit_isAddLedgerType') && document.getElementById('edit_isAddLedgerType').checked)) ? "" : (document.getElementById('edit_subMonth') ? document.getElementById('edit_subMonth').value : ""),
     entryType: document.getElementById('edit_entryType').value,
     bankAccount: document.getElementById('edit_bankAccountSelect') ? document.getElementById('edit_bankAccountSelect').value : "State Bank of India",
@@ -11685,6 +14194,9 @@ function handleEditFormSubmit(e) {
       if (originalEditVrNo && originalEditVrNo !== formPayload.vrNo) {
         syncSharedLinkForTransaction(originalEditVrNo, formPayload);
       }
+      if (typeof window.refreshDatabase === 'function') {
+        window.refreshDatabase(true);
+      }
       setTimeout(() => { cancelEditModeTab({ type: 'updated', vrNo: formPayload.vrNo }); }, 500);
     } else {
       alert("Oops! Something went wrong: " + res);
@@ -11706,47 +14218,10 @@ function handleEditFormSubmit(e) {
   formPayload.id = editId;
 
   const saves = [];
-
-  // Find all existing records for the old vrNo, splitGroupId, and IDs to delete them first
-  // This ensures we fully replace the old entry (whether single or split) with the new one
-  const targetDocIdsToDelete = new Set();
-  if (editId) targetDocIdsToDelete.add(String(editId));
-  if (window.originalEditAllTxIds && Array.isArray(window.originalEditAllTxIds)) {
-    window.originalEditAllTxIds.forEach(id => targetDocIdsToDelete.add(String(id)));
-  }
-
-  const allGen = (typeof allTimeGeneralTxList !== 'undefined') ? allTimeGeneralTxList : [];
-  const allBank = (typeof loadedBankBookTransactions !== 'undefined') ? loadedBankBookTransactions : [];
-
-  if (window.originalEditSplitGroupId) {
-    const sg = window.originalEditSplitGroupId;
-    allGen.forEach(t => { if (t.splitGroupId === sg) targetDocIdsToDelete.add(String(t.id)); });
-    allBank.forEach(t => { if (t.splitGroupId === sg) targetDocIdsToDelete.add(String(t.id)); });
-  }
-
-  const oldVrClean = normalizeVrLocally(originalEditVrNo);
-  if (oldVrClean && oldVrClean !== '-' && oldVrClean !== '--' && oldVrClean !== 'ob') {
-    allGen.forEach(t => {
-      if (normalizeVrLocally(t.vrNo) === oldVrClean || normalizeVrLocally(t.rcptNo) === oldVrClean || normalizeVrLocally(t.payNo) === oldVrClean) {
-        targetDocIdsToDelete.add(String(t.id));
-      }
-    });
-    allBank.forEach(t => {
-      if (normalizeVrLocally(t.vrNo) === oldVrClean || normalizeVrLocally(t.rcptNo) === oldVrClean || normalizeVrLocally(t.payNo) === oldVrClean) {
-        targetDocIdsToDelete.add(String(t.id));
-      }
-    });
-  }
-
-  targetDocIdsToDelete.forEach(id => {
-    saves.push(db.collection("transactions").doc(String(id)).delete());
-    saves.push(db.collection("bank_transactions").doc(String(id)).delete());
-    let mirrorId = String(id).includes("_mirror") ? String(id).replace("_mirror", "") : String(id) + "_mirror";
-    saves.push(db.collection("transactions").doc(mirrorId).delete());
-    saves.push(db.collection("bank_transactions").doc(mirrorId).delete());
-  });
-
   const isSplitEntry = document.getElementById('edit_isSplitEntry') ? document.getElementById('edit_isSplitEntry').checked : false;
+
+  const oldEntryType = (window.originalEditEntryType || 'Cash').toLowerCase();
+  const newEntryType = (formPayload.entryType || 'Cash').toLowerCase();
 
   if (isSplitEntry) {
     const rows = document.querySelectorAll('.edit-split-row');
@@ -11819,16 +14294,24 @@ function handleEditFormSubmit(e) {
       formPayload.receipt = "";
     }
 
-    // Create new documents for each item
+    // Use existing IDs for split items where available, generate new ones for the rest
+    const existingIds = (window.originalEditAllTxIds && Array.isArray(window.originalEditAllTxIds) && window.originalEditAllTxIds.length > 0)
+      ? [...window.originalEditAllTxIds]
+      : [String(editId)];
+    if (!existingIds.includes(String(editId))) {
+      existingIds.unshift(String(editId));
+    }
+
+    const usedIds = new Set();
     items.forEach((item, index) => {
-      // Use original edit ID for the first item, generate new IDs for the rest
-      const newId = (index === 0 && window.originalEditId) ? window.originalEditId : String(Date.now() + index);
+      const targetId = existingIds[index] || String(Date.now() + index);
+      usedIds.add(String(targetId));
 
       let itemReceipt = (mode === 'Receipt') ? item.amt : "";
       let itemPayment = (mode === 'Payment') ? item.amt : "";
 
       const itemPayload = { ...formPayload };
-      itemPayload.id = newId;
+      itemPayload.id = targetId;
       itemPayload.amount = item.amt;
       itemPayload.receipt = itemReceipt;
       itemPayload.payment = itemPayment;
@@ -11842,7 +14325,15 @@ function handleEditFormSubmit(e) {
       itemPayload.isAddLedgerType = true;
       itemPayload.splitTotalAmount = totalAmt;
 
-      saves.push(db.collection("transactions").doc(String(newId)).set(itemPayload));
+      saves.push(db.collection("transactions").doc(String(targetId)).set(itemPayload));
+    });
+
+    // Delete any old sibling records that were removed from the split
+    existingIds.forEach(oldId => {
+      if (!usedIds.has(String(oldId))) {
+        saves.push(db.collection("transactions").doc(String(oldId)).delete());
+        saves.push(db.collection("bank_transactions").doc(String(oldId)).delete());
+      }
     });
 
     const isContraCash = (entryTypeVal === 'Cash' && items.some(it => it.type === 'Contra'));
@@ -11860,10 +14351,19 @@ function handleEditFormSubmit(e) {
         bankMode = (formPayload.mode === 'Receipt' || formPayload.mode === 'Credit (Receipt)') ? "Credit (Receipt)" : "Debit (Payment)";
       }
 
-      const isCredit = bankMode.includes('Credit') || bankMode.includes('Receipt');
       const combinedDesc = items.map(it => {
-        const d = it.desc || it.subtype || it.type || '';
-        return (items.length > 1 && d) ? `${d} (₹${formatCurrencyNoSymbol(it.amt)})` : d;
+        const typeName = (it.type || it.category || '').trim();
+        const subName = (it.subtype || '').trim();
+        const descName = (it.desc || it.description || it.particulars || it.month || '').trim();
+        const amt = Number(it.amt || it.amount || 0);
+        let label = typeName || subName || 'Split Item';
+        if (subName && subName !== typeName && !label.toLowerCase().includes(subName.toLowerCase())) {
+          label += ' - ' + subName;
+        }
+        if (descName && descName !== typeName && descName !== subName && !label.toLowerCase().includes(descName.toLowerCase())) {
+          label += ' (' + descName + ')';
+        }
+        return `${label} (₹${formatCurrencyNoSymbol(amt)})`;
       }).filter(Boolean).join(' + ');
 
       const mainAcc = formPayload.accountName ? formPayload.accountName.trim() : "";
@@ -11874,17 +14374,29 @@ function handleEditFormSubmit(e) {
         id: bankId,
         date: formPayload.date,
         vrNo: formPayload.vrNo || '-',
+        voucher_no: formPayload.vrNo || '-',
+        accountName: formPayload.accountName || '',
+        account_name: formPayload.accountName || '',
+        name: formPayload.accountName || '',
+        memberCode: formPayload.memberCode || '',
+        member_code: formPayload.memberCode || '',
+        address: formPayload.address || '',
+        phone: formPayload.phone || '',
+        memberId: formPayload.memberId || null,
+        member_id: formPayload.memberId || null,
         description: bankDesc,
+        particulars: bankDesc,
         amount: totalAmt,
         receipt: isCredit ? totalAmt : "",
         payment: !isCredit ? totalAmt : "",
         credit: isCredit ? totalAmt : 0,
         debit: !isCredit ? totalAmt : 0,
         account: formPayload.bankAccount,
+        bankAccount: formPayload.bankAccount,
         mode: bankMode,
         bankSubtype: bSubtype,
-        inCashBook: isContraEntry ? true : (formPayload.addToCashBook === true),
-        addToCashBook: isContraEntry ? true : (formPayload.addToCashBook === true),
+        inCashBook: isContraCash ? true : (formPayload.addToCashBook === true),
+        addToCashBook: isContraCash ? true : (formPayload.addToCashBook === true),
         entryType: "Bank",
         isCheque: formPayload.isCheque,
         chequeNo: formPayload.chequeNo || "",
@@ -11897,50 +14409,134 @@ function handleEditFormSubmit(e) {
     }
 
   } else {
-    // Single entry logic
-    formPayload.isSplitEntry = false; // explicitly set to false if converting split to single
-    saves.push(db.collection("transactions").doc(String(editId)).set(formPayload));
+    // Single entry logic: NEVER delete editId! Update the record in place.
+    formPayload.isSplitEntry = false;
 
-    const isContraCash = (entryTypeVal === 'Cash' && parsedType === 'Contra');
-    if (formPayload.entryType === 'Bank' || isContraCash) {
-      const isContraEntry = isContraCash || formPayload.bankSubtype === 'Cash Deposit (Contra)' || formPayload.bankSubtype === 'Cash Withdrawal (Contra)';
-      const bSubtype = isContraCash ? parsedSubtype : (formPayload.bankSubtype || '');
+    if (newEntryType === 'bank') {
+      const isCredit = (mode === 'Receipt' || mode === 'Credit' || (mode && mode.includes('Credit')) || (formReceipt && Number(formReceipt) > 0));
+      const bSubtype = formPayload.bankSubtype || formPayload.subtype || "";
+      const isContraBank = bSubtype === 'Cash Deposit (Contra)' || bSubtype === 'Cash Withdrawal (Contra)' || bSubtype.toLowerCase().includes('cash deposit') || bSubtype.toLowerCase().includes('cash withdrawal');
+      const shouldAddToCash = formPayload.addToCashBook === true || isContraBank;
 
-      let bankMode;
-      if (bSubtype === 'Cash Deposit (Contra)' || bSubtype.toLowerCase().includes('cash deposit')) {
-        bankMode = "Credit (Receipt)";
-      } else if (bSubtype === 'Cash Withdrawal (Contra)' || bSubtype.toLowerCase().includes('cash withdrawal')) {
-        bankMode = "Debit (Payment)";
-      } else if (isContraCash) {
-        bankMode = (mode === 'Receipt' ? "Debit (Payment)" : "Credit (Receipt)");
-      } else {
-        bankMode = (formPayload.mode === 'Receipt' || formPayload.mode === 'Credit (Receipt)') ? "Credit (Receipt)" : "Debit (Payment)";
-      }
-
-      const isCredit = bankMode.includes('Credit') || bankMode.includes('Receipt');
       const bankPayload = {
         id: editId,
         date: formPayload.date,
-        vrNo: formPayload.vrNo || '-',
+        vrNo: isContraBank ? (editContraBankVrVal || formPayload.vrNo || '--') : (formPayload.vrNo || '--'),
+        voucher_no: isContraBank ? (editContraBankVrVal || formPayload.vrNo || '--') : (formPayload.vrNo || '--'),
+        contraVrNo: formPayload.vrNo,
+        contra_vr_no: formPayload.vrNo,
+        cashVrNo: formPayload.vrNo,
+        cash_vr_no: formPayload.vrNo,
         description: formPayload.accountName && formPayload.description ? formPayload.accountName + " - " + formPayload.description : (formPayload.accountName || formPayload.description || '-'),
+        particulars: formPayload.accountName && formPayload.description ? formPayload.accountName + " - " + formPayload.description : (formPayload.accountName || formPayload.description || '-'),
         amount: amountVal,
         receipt: isCredit ? amountVal : "",
         payment: !isCredit ? amountVal : "",
         credit: isCredit ? amountVal : 0,
         debit: !isCredit ? amountVal : 0,
         account: formPayload.bankAccount,
-        mode: bankMode,
+        bankAccount: formPayload.bankAccount,
+        mode: isCredit ? "Credit (Receipt)" : "Debit (Payment)",
+        type: formPayload.type || (bSubtype.includes('Interest') ? 'Bank Interest (Income)' : "Bank"),
+        subtype: formPayload.subtype || formPayload.bankSubtype || bSubtype || "",
+        category: formPayload.category || bSubtype || (bSubtype.includes('Interest') ? 'Bank Interest (Income)' : 'Bank'),
         bankSubtype: bSubtype,
-        inCashBook: isContraEntry ? true : (formPayload.addToCashBook === true),
-        addToCashBook: isContraEntry ? true : (formPayload.addToCashBook === true),
         entryType: "Bank",
         isCheque: formPayload.isCheque,
         chequeNo: formPayload.chequeNo || "",
-        transactionId: formPayload.transactionId || ""
+        transactionId: formPayload.transactionId || "",
+        financialYear: formPayload.financialYear || "2026-2027",
+        memberCode: formPayload.memberCode || "",
+        member_code: formPayload.memberCode || "",
+        accountName: formPayload.accountName || "",
+        account_name: formPayload.accountName || "",
+        name: formPayload.accountName || "",
+        address: formPayload.address || "",
+        phone: formPayload.phone || "",
+        memberId: formPayload.memberId || null,
+        member_id: formPayload.memberId || null,
+        inCashBook: shouldAddToCash,
+        addToCashBook: shouldAddToCash
       };
-      saves.push(
-        db.collection("bank_transactions").doc(String(editId)).set(bankPayload)
-      );
+      saves.push(db.collection("bank_transactions").doc(String(editId)).set(bankPayload));
+      // If previously in cash_book and not marked for cash book, remove from cash_book
+      if (oldEntryType === 'cash' && !shouldAddToCash) {
+        saves.push(db.collection("transactions").doc(String(editId)).delete());
+      } else if (shouldAddToCash) {
+        // Save counterpart/contra row in cash transactions
+        const cashRcpt = isContraBank ? (!isCredit ? amountVal : "") : (isCredit ? amountVal : "");
+        const cashPmt = isContraBank ? (isCredit ? amountVal : "") : (!isCredit ? amountVal : "");
+        const cashPayload = {
+          id: editId,
+          date: formPayload.date,
+          vrNo: formPayload.vrNo && formPayload.vrNo !== '--' ? formPayload.vrNo : (editContraBankVrVal || '--'),
+          voucher_no: formPayload.vrNo && formPayload.vrNo !== '--' ? formPayload.vrNo : (editContraBankVrVal || '--'),
+          contraVrNo: editContraBankVrVal || bankPayload.vrNo,
+          contra_vr_no: editContraBankVrVal || bankPayload.vrNo,
+          bankVrNo: editContraBankVrVal || bankPayload.vrNo,
+          accountName: formPayload.accountName || (isCredit ? "Cash Deposit to Bank" : "Cash Withdrawal from Bank"),
+          description: bankPayload.description,
+          amount: amountVal,
+          receipt: cashRcpt,
+          payment: cashPmt,
+          type: "Contra",
+          subtype: bSubtype || "Contra",
+          category: "Contra",
+          entryType: "Bank",
+          bankAccount: formPayload.bankAccount,
+          bankSubtype: bSubtype,
+          addToCashBook: true,
+          inCashBook: true
+        };
+        saves.push(db.collection("transactions").doc(String(editId)).set(cashPayload));
+      }
+    } else {
+      // Cash entry: update transactions (cash_book)
+      saves.push(db.collection("transactions").doc(String(editId)).set(formPayload));
+      // If previously in bank_book, remove from bank_book
+      if (oldEntryType === 'bank') {
+        saves.push(db.collection("bank_transactions").doc(String(editId)).delete());
+      }
+      // If it is a Cash Contra entry, also save counterpart bank record
+      const isContraCash = (entryTypeVal === 'Cash' && parsedType === 'Contra');
+      if (isContraCash) {
+        const bSubtype = parsedSubtype || formPayload.bankSubtype || '';
+        const bankMode = (bSubtype === 'Cash Deposit (Contra)') ? "Credit (Receipt)" : "Debit (Payment)";
+        const isCredit = bankMode.includes('Credit');
+        const bankPayload = {
+          id: editId,
+          date: formPayload.date,
+          vrNo: editContraBankVrVal || (formPayload.vrNo ? (formPayload.vrNo.endsWith('/B') ? formPayload.vrNo : `${formPayload.vrNo}/B`) : '-'),
+          contraVrNo: formPayload.vrNo,
+          contra_vr_no: formPayload.vrNo,
+          cashVrNo: formPayload.vrNo,
+          cash_vr_no: formPayload.vrNo,
+          description: formPayload.accountName && formPayload.description ? formPayload.accountName + " - " + formPayload.description : (formPayload.accountName || formPayload.description || '-'),
+          amount: amountVal,
+          receipt: isCredit ? amountVal : "",
+          payment: !isCredit ? amountVal : "",
+          credit: isCredit ? amountVal : 0,
+          debit: !isCredit ? amountVal : 0,
+          account: formPayload.bankAccount,
+          mode: bankMode,
+          bankSubtype: bSubtype,
+          entryType: "Bank",
+          isCheque: formPayload.isCheque,
+          chequeNo: formPayload.chequeNo || "",
+          transactionId: formPayload.transactionId || ""
+        };
+        saves.push(db.collection("bank_transactions").doc(String(editId)).set(bankPayload));
+      }
+    }
+
+    // Clean up any other sibling records if this was converted from a split entry
+    if (window.originalEditAllTxIds && Array.isArray(window.originalEditAllTxIds)) {
+      window.originalEditAllTxIds.forEach(id => {
+        if (String(id) !== String(editId)) {
+          saves.push(db.collection("transactions").doc(String(id)).delete());
+          saves.push(db.collection("bank_transactions").doc(String(id)).delete());
+        }
+      });
     }
   }
 
@@ -12225,6 +14821,26 @@ function refreshBankBookData(forceReload = false) {
   });
 }
 
+function formatSplitItemsDescription(items) {
+  if (!Array.isArray(items) || items.length === 0) return '';
+  return items.map(it => {
+    let typeName = (it.type || it.category || '').trim();
+    let subName = (it.subtype || '').trim();
+    let descName = (it.desc || it.description || it.particulars || it.month || '').trim();
+    let amt = Number(it.amt || it.amount || it.receipt || it.payment || 0);
+    let amtStr = typeof formatCurrencyNoDecimals === 'function' ? formatCurrencyNoDecimals(amt) : ('₹' + amt);
+
+    let label = typeName || subName || 'Split Item';
+    if (subName && subName !== typeName && !label.toLowerCase().includes(subName.toLowerCase())) {
+      label += ' - ' + subName;
+    }
+    if (descName && descName !== typeName && descName !== subName && !label.toLowerCase().includes(descName.toLowerCase())) {
+      label += ' (' + descName + ')';
+    }
+    return `${label} (${amtStr})`;
+  }).join(' + ');
+}
+
 function renderBankBookTransactions() {
   const tbody = document.getElementById('bankBookTableBody');
   if (!tbody) return;
@@ -12245,7 +14861,7 @@ function renderBankBookTransactions() {
     // Account Filter
     if (accountFilter !== 'ALL') {
       const filterLower = accountFilter.toLowerCase();
-      const accLower = (tx.account || '').toLowerCase();
+      const accLower = (tx.account || tx.accountName || tx.account_name || tx.bankAccount || tx.bank_account || '').toLowerCase();
       const isFD = filterLower.includes('fixed deposit') || filterLower.includes('fd');
       const txIsFD = accLower.includes('fixed deposit') || accLower.includes('fd');
       if (isFD !== txIsFD) return false;
@@ -12281,7 +14897,10 @@ function renderBankBookTransactions() {
       const vrNo = (tx.vrNo || '').toLowerCase();
       const acc = (tx.account || '').toLowerCase();
       const chq = String(tx.chequeNo || tx.chqNo || '').toLowerCase();
-      if (!desc.includes(searchVal) && !vrNo.includes(searchVal) && !acc.includes(searchVal) && !chq.includes(searchVal)) return false;
+      const accName = (tx.accountName || tx.name || '').toLowerCase();
+      const mCode = (tx.memberCode || '').toLowerCase();
+      const addr = (tx.address || '').toLowerCase();
+      if (!desc.includes(searchVal) && !vrNo.includes(searchVal) && !acc.includes(searchVal) && !chq.includes(searchVal) && !accName.includes(searchVal) && !mCode.includes(searchVal) && !addr.includes(searchVal)) return false;
     }
 
     return true;
@@ -12367,6 +14986,10 @@ function renderBankBookTransactions() {
     let txFullDesc = finalParts.join(' - ') || '-';
 
     const singleChq = (tx.chequeNo || tx.chqNo || '').trim();
+    const txSplitList = (Array.isArray(tx.splitItems) && tx.splitItems.length > 0)
+      ? tx.splitItems
+      : ((Array.isArray(tx._splitItems) && tx._splitItems.length > 0) ? tx._splitItems : null);
+
     if (!baseVrMap[key] || isBlankVr) {
       const newTx = Object.assign({}, tx);
       newTx.originalVr = rawVr;
@@ -12376,26 +14999,65 @@ function renderBankBookTransactions() {
       newTx.allTxIds = [tx.id];
       newTx.allChequeNos = singleChq ? [singleChq] : [];
       newTx.description = txFullDesc;
+      newTx._splitItems = txSplitList ? [...txSplitList] : [tx];
+      newTx._descParts = [{
+        text: txFullDesc,
+        type: typeStr,
+        amount: newTx.amount,
+        desc: dStr
+      }];
       if (!isBlankVr) baseVrMap[key] = newTx;
       groupedFiltered.push(newTx);
     } else {
-      baseVrMap[key].amount += Number(tx.amount || tx.receipt || tx.payment || tx.payments || 0);
-      if (rawVr && !baseVrMap[key].allVrNos.includes(rawVr)) {
-        baseVrMap[key].allVrNos.push(rawVr);
+      const target = baseVrMap[key];
+      const curAmt = Number(tx.amount || tx.receipt || tx.payment || tx.payments || 0);
+      target.amount += curAmt;
+      if (rawVr && !target.allVrNos.includes(rawVr)) {
+        target.allVrNos.push(rawVr);
       }
-      if (!baseVrMap[key].allTxIds.includes(tx.id)) {
-        baseVrMap[key].allTxIds.push(tx.id);
+      if (!target.allTxIds.includes(tx.id)) {
+        target.allTxIds.push(tx.id);
       }
-      if (singleChq && !baseVrMap[key].allChequeNos.includes(singleChq)) {
-        baseVrMap[key].allChequeNos.push(singleChq);
+      if (singleChq && !target.allChequeNos.includes(singleChq)) {
+        target.allChequeNos.push(singleChq);
       }
-      const currentDesc = baseVrMap[key].description || '';
-      if (txFullDesc && txFullDesc !== '-' && !currentDesc.includes(txFullDesc)) {
-        baseVrMap[key].description = currentDesc && currentDesc !== '-' ? currentDesc + ' + ' + txFullDesc : txFullDesc;
+      if (!target.accountName && tx.accountName) {
+        target.accountName = tx.accountName;
+        target.memberCode = tx.memberCode || target.memberCode;
+        target.address = tx.address || target.address;
       }
+      if (txSplitList) {
+        if (!target._splitItems) target._splitItems = [];
+        target._splitItems.push(...txSplitList);
+      } else {
+        if (!target._splitItems) target._splitItems = [];
+        target._splitItems.push(tx);
+      }
+      if (!target._descParts) target._descParts = [];
+      target._descParts.push({
+        text: txFullDesc,
+        type: typeStr,
+        amount: curAmt,
+        desc: dStr
+      });
       if (tx.inCashBook) {
-        baseVrMap[key].inCashBook = true;
+        target.inCashBook = true;
       }
+    }
+  });
+
+  // Define and format split descriptions for Bank Book (e.g. Subscription: ₹2,500 + Charity: ₹500)
+  groupedFiltered.forEach(tx => {
+    if (Array.isArray(tx._splitItems) && tx._splitItems.length > 1) {
+      tx.description = formatSplitItemsDescription(tx._splitItems);
+    } else if (Array.isArray(tx.splitItems) && tx.splitItems.length > 1) {
+      tx.description = formatSplitItemsDescription(tx.splitItems);
+    } else if (Array.isArray(tx._descParts) && tx._descParts.length > 1) {
+      tx.description = tx._descParts.map(p => {
+        const amtStr = typeof formatCurrencyNoDecimals === 'function' ? formatCurrencyNoDecimals(p.amount) : ('₹' + p.amount);
+        const label = p.type ? (p.text && !p.text.startsWith(p.type) ? `${p.type}: ${p.text}` : p.text) : p.text;
+        return `${label} (${amtStr})`;
+      }).join(' + ');
     }
   });
 
@@ -12436,7 +15098,10 @@ function renderBankBookTransactions() {
   const groupedByAcc = {};
 
   groupedFiltered.forEach(tx => {
-    const acc = tx.account || "State Bank of India";
+    const rawAcc = tx.account || tx.bank_account || tx.bankAccount || tx.accountName || tx.account_name || "State Bank of India";
+    const acc = (rawAcc.toLowerCase().includes('fixed deposit') || rawAcc.toLowerCase().includes('fd'))
+      ? 'SBI Fixed Deposit'
+      : 'State Bank of India';
     if (!groupedByAcc[acc]) groupedByAcc[acc] = [];
     groupedByAcc[acc].push(tx);
   });
@@ -12446,7 +15111,7 @@ function renderBankBookTransactions() {
       if (!groupedByAcc['State Bank of India']) groupedByAcc['State Bank of India'] = [];
       groupedByAcc['State Bank of India'].push(sbiObTx);
     }
-    if (accountFilter === 'ALL' || accountFilter.toLowerCase().includes('fixed deposit') || accountFilter.toLowerCase().includes('fd')) {
+    if (accountFilter === 'ALL' || accountFilter.toLowerCase().includes('fixed deposit') || accountFilter.toLowerCase() === 'fd') {
       if (!groupedByAcc['SBI Fixed Deposit']) groupedByAcc['SBI Fixed Deposit'] = [];
       groupedByAcc['SBI Fixed Deposit'].push(fdObTx);
     }
@@ -12538,14 +15203,20 @@ function renderBankBookTransactions() {
           else if (v.includes('-') && !v.startsWith('-')) b = v.split('-')[0];
           uniqueBaseVrs.add(b);
         });
-        const displayVr = uniqueBaseVrs.size > 1 ? vrNosList.join(', ') : tx.displayVr;
+        let displayVr = uniqueBaseVrs.size > 1 ? vrNosList.join(', ') : (tx.displayVr || cleanVr);
+        const contraCashVr = tx.contra_vr_no || tx.contraVrNo || tx.cash_vr_no || tx.cashVrNo || '';
+        const isBankContra = (tx.bankSubtype && tx.bankSubtype.includes('Contra')) || (tx.category && tx.category.includes('Contra')) || (tx.particulars && tx.particulars.toLowerCase().includes('cash deposit')) || (tx.particulars && tx.particulars.toLowerCase().includes('cash withdrawal')) || (tx.description && tx.description.toLowerCase().includes('cash deposit')) || (tx.description && tx.description.toLowerCase().includes('cash withdrawal'));
+        if (isBankContra && contraCashVr && contraCashVr !== displayVr && contraCashVr !== '-' && contraCashVr !== '--') {
+          displayVr = `<div>${displayVr}</div><span style="display:inline-block; font-size:10px; color:#059669; font-weight:700; background:#ecfdf5; border:1px solid #a7f3d0; border-radius:3px; padding:1px 4px; margin-top:2px;" title="Paired Cash Voucher No.">Cash: ${contraCashVr}</span>`;
+        }
 
         let printBtnHtml = '';
-        if (cleanVr && cleanVr !== '-' && cleanVr !== '--') {
+        const printVrTarget = (cleanVr && cleanVr !== '-' && cleanVr !== '--') ? cleanVr : (contraCashVr || '');
+        if (printVrTarget) {
           if (isCredit) {
-            printBtnHtml = `<button class="btn-action btn-table-action" style="background: #059669; color: #ffffff; border: none; padding-right: 4px;" onclick="openReceiptModalByVrNo('${cleanVr}')" title="Print Receipt">🧾${isPrinted}${tx.whatsappSent ? ' <span title="WhatsApp Sent" style="font-size: 0.8rem; margin-left: 2px;">💬</span>' : ''}</button>`;
+            printBtnHtml = `<button class="btn-action btn-table-action" style="background: #059669; color: #ffffff; border: none; padding-right: 4px;" onclick="openReceiptModalByVrNo('${printVrTarget}', '${tx.id}', 'Bank')" title="Print Receipt">🧾${isPrinted}${tx.whatsappSent ? ' <span title="WhatsApp Sent" style="font-size: 0.8rem; margin-left: 2px;">💬</span>' : ''}</button>`;
           } else {
-            printBtnHtml = `<button class="btn-action btn-table-action" style="background: #dc2626; color: #ffffff; border: none; padding-right: 4px;" onclick="openPaymentVoucherModalByVrNo('${cleanVr}')" title="Print Voucher">🧾${isPrinted}${tx.whatsappSent ? ' <span title="WhatsApp Sent" style="font-size: 0.8rem; margin-left: 2px;">💬</span>' : ''}</button>`;
+            printBtnHtml = `<button class="btn-action btn-table-action" style="background: #dc2626; color: #ffffff; border: none; padding-right: 4px;" onclick="openPaymentVoucherModalByVrNo('${printVrTarget}', '${tx.id}', 'Bank')" title="Print Voucher">🧾${isPrinted}${tx.whatsappSent ? ' <span title="WhatsApp Sent" style="font-size: 0.8rem; margin-left: 2px;">💬</span>' : ''}</button>`;
           }
         }
 
@@ -12565,19 +15236,37 @@ function renderBankBookTransactions() {
         const txIdsAttr = (tx.allTxIds || [tx.id]).filter(Boolean).join(',');
         const splitGroupAttr = tx.splitGroupId || '';
 
+        const rawMemberName = (tx.accountName && tx.accountName !== '-') ? tx.accountName : ((tx.name && tx.name !== '-') ? tx.name : '');
+        const addr = resolveMemberAddress(tx);
+        const memCode = tx.memberCode || (rawMemberName ? getMemberCode(rawMemberName, addr) : '');
+        let memberCellHtml = '';
+        if (rawMemberName) {
+          const formattedMemberName = formatMemberDisplayName(rawMemberName, tx.title || '');
+          memberCellHtml = `
+            <div style="font-weight: 700; color: #0f172a; line-height: 1.25;">
+              ${formattedMemberName}
+              ${(memCode && memCode !== '-') ? `<span style="font-size: 0.72rem; color: #4338ca; background: #e0e7ff; padding: 1px 5px; border-radius: 4px; font-weight: 700; margin-left: 4px;">${memCode}</span>` : ''}
+            </div>
+            ${addr ? `<div style="font-size: 0.75rem; color: #64748b; font-weight: normal; margin-top: 2px; line-height: 1.2;">📍 ${addr}</div>` : ''}
+            <div style="color: #475569; font-size: 0.85rem; margin-top: 3px; line-height: 1.25;">${tx.description || '-'}</div>
+          `;
+        } else {
+          memberCellHtml = `<div style="line-height: 1.3;">${tx.description || '-'}</div>`;
+        }
+
         tbody.innerHTML += `
               <tr>
                 <td style="text-align: center;"><input type="checkbox" class="bank-batch-checkbox" value="${cleanVr}" data-tx-ids="${txIdsAttr}" data-split-group="${splitGroupAttr}"></td>
                 <td style="font-weight: 600; white-space: nowrap;">${formatDateHtml(tx.date)}</td>
                 <td style="font-weight: 700; text-align: center;"><div>${displayVr}</div>${chqHtml}</td>
                 <td style="font-weight: 600;">${tx.account || tx.bankAccount || 'State Bank of India'}</td>
-                <td style="line-height: 1.3;">${tx.description || '-'}</td>
+                <td>${memberCellHtml}</td>
                 <td class="num-col rcpt-val" style="font-weight: 700; color: #047857; text-align: right;">${isCredit ? formatCurrency(amt) : '-'}</td>
                 <td class="num-col exp-val" style="font-weight: 700; color: #b91c1c; text-align: right;">${!isCredit ? formatCurrency(amt) : '-'}</td>
                 <td class="num-col" style="font-weight: 700; color: #0369a1; text-align: right;">${formatCurrency(tx._runningBalance)}</td>
                 <td style="text-align: center; white-space: nowrap;">
                   ${combinedIconHtml}
-                  <button class="btn-action btn-table-action" style="background: #2563eb; color: #ffffff; border: none;" onclick="loadEntryForEdit('${cleanVr}', '${tx.id}')" title="Edit Entry">✏️</button>
+                  <button class="btn-action btn-table-action" style="background: #2563eb; color: #ffffff; border: none;" onclick="loadEntryForEdit('${cleanVr}', '${tx.id}', 'Bank')" title="Edit Entry">✏️</button>
                   ${printBtnHtml}
                 </td>
               </tr>
@@ -12612,40 +15301,77 @@ window.showCombinedDetails = function (txIdsString) {
 
     if (tx) {
       let cleanVr = String(tx.vrNo || '').trim();
-      let amt = Number(tx.amount || tx.receipt || tx.payment || tx.payments || 0);
+      const splitItems = (Array.isArray(tx.splitItems) && tx.splitItems.length > 0)
+        ? tx.splitItems
+        : ((Array.isArray(tx._splitItems) && tx._splitItems.length > 0) ? tx._splitItems : null);
 
-      let nameStr = (tx.accountName || tx.name || '').trim();
-      let typeStr = (tx.subtype || tx.type || '').trim();
-      if (tx.type === 'Charity' && (tx.subtype === 'Paid' || tx.subtype === 'Received' || tx.subtype === 'paid' || tx.subtype === 'received')) {
-        typeStr = 'Charity ' + tx.subtype.charAt(0).toUpperCase() + tx.subtype.slice(1);
-      }
-      let descStr = (tx.description || '').trim();
+      if (splitItems && splitItems.length > 1) {
+        splitItems.forEach((it, sIdx) => {
+          let sAmt = Number(it.amt || it.amount || it.receipt || it.payment || 0);
+          let sType = (it.type || it.category || 'Split Item').trim();
+          let sSub = (it.subtype || '').trim();
+          let sDesc = (it.desc || it.description || it.particulars || it.month || '').trim();
+          let label = sType;
+          if (sSub && sSub !== sType) label += ' - ' + sSub;
+          if (sDesc && sDesc !== sType && sDesc !== sSub) label += ` (${sDesc})`;
 
-      let parts = [];
-      if (nameStr && nameStr !== '-') parts.push(nameStr);
-      if (typeStr && typeStr !== '-' && typeStr !== 'Bank' && typeStr !== 'Cash') parts.push(typeStr);
-      if (descStr && descStr !== '-') parts.push(descStr);
+          let badgeColor = '#2563eb';
+          let badgeBg = '#eff6ff';
+          let badgeBorder = '#bfdbfe';
+          const tLower = sType.toLowerCase();
+          if (tLower.includes('subscr')) {
+            badgeColor = '#4338ca'; badgeBg = '#e0e7ff'; badgeBorder = '#c7d2fe';
+          } else if (tLower.includes('charity')) {
+            badgeColor = '#059669'; badgeBg = '#ecfdf5'; badgeBorder = '#a7f3d0';
+          } else if (tLower.includes('offer')) {
+            badgeColor = '#d97706'; badgeBg = '#fef3c7'; badgeBorder = '#fde68a';
+          }
 
-      // Deduplicate parts (e.g. if name is in description)
-      let finalParts = [];
-      parts.forEach(p => {
-        let isDuplicate = finalParts.some(fp => fp.toLowerCase().includes(p.toLowerCase()) || p.toLowerCase().includes(fp.toLowerCase()));
-        if (!isDuplicate) finalParts.push(p);
-      });
+          html += `
+            <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); position: relative;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                <span style="font-size: 0.75rem; font-weight: 700; color: ${badgeColor}; background: ${badgeBg}; border: 1px solid ${badgeBorder}; padding: 2px 8px; border-radius: 9999px;">🏷️ ${sType}</span>
+                <span style="font-weight: 800; font-size: 1rem; color: #0f172a;">${formatCurrency(sAmt)}</span>
+              </div>
+              <div style="font-size: 0.88rem; color: #334155; font-weight: 600;">${label}</div>
+            </div>
+          `;
+          total += sAmt;
+        });
+      } else {
+        let amt = Number(tx.amount || tx.receipt || tx.payment || tx.payments || 0);
+        let nameStr = (tx.accountName || tx.name || '').trim();
+        let typeStr = (tx.subtype || tx.type || '').trim();
+        if (tx.type === 'Charity' && (tx.subtype === 'Paid' || tx.subtype === 'Received' || tx.subtype === 'paid' || tx.subtype === 'received')) {
+          typeStr = 'Charity ' + tx.subtype.charAt(0).toUpperCase() + tx.subtype.slice(1);
+        }
+        let descStr = (tx.description || '').trim();
 
-      let desc = finalParts.join(' - ') || '-';
-      html += `
-        <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 12px; position: relative;">
-          <button class="btn-action btn-table-action" style="position: absolute; top: 10px; right: 10px; background: #2563eb; color: #ffffff; border: none; font-size: 0.8rem; padding: 4px 8px; border-radius: 4px; cursor: pointer; display: flex; align-items: center; gap: 4px;" onclick="closeCombinedEntriesModal(); loadEntryForEdit('${cleanVr}', '${tx.id}')" title="Edit Entry">✏️ Edit</button>
-          
-          <div style="display: flex; justify-content: space-between; margin-bottom: 4px; padding-right: 65px;">
-            <span style="font-weight: 700; color: #2563eb;">#${cleanVr}</span>
-            <span style="font-weight: 700; color: #0f172a;">${formatCurrency(amt)}</span>
+        let parts = [];
+        if (nameStr && nameStr !== '-') parts.push(nameStr);
+        if (typeStr && typeStr !== '-' && typeStr !== 'Bank' && typeStr !== 'Cash') parts.push(typeStr);
+        if (descStr && descStr !== '-') parts.push(descStr);
+
+        let finalParts = [];
+        parts.forEach(p => {
+          let isDuplicate = finalParts.some(fp => fp.toLowerCase().includes(p.toLowerCase()) || p.toLowerCase().includes(fp.toLowerCase()));
+          if (!isDuplicate) finalParts.push(p);
+        });
+
+        let desc = finalParts.join(' - ') || '-';
+        html += `
+          <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 12px; position: relative;">
+            <button class="btn-action btn-table-action" style="position: absolute; top: 10px; right: 10px; background: #2563eb; color: #ffffff; border: none; font-size: 0.8rem; padding: 4px 8px; border-radius: 4px; cursor: pointer; display: flex; align-items: center; gap: 4px;" onclick="closeCombinedEntriesModal(); loadEntryForEdit('${cleanVr}', '${tx.id}', 'Bank')" title="Edit Entry">✏️ Edit</button>
+            
+            <div style="display: flex; justify-content: space-between; margin-bottom: 4px; padding-right: 65px;">
+              <span style="font-weight: 700; color: #2563eb;">#${cleanVr}</span>
+              <span style="font-weight: 700; color: #0f172a;">${formatCurrency(amt)}</span>
+            </div>
+            <div style="font-size: 0.9rem; color: #475569; padding-right: 65px;">${desc}</div>
           </div>
-          <div style="font-size: 0.9rem; color: #475569; padding-right: 65px;">${desc}</div>
-        </div>
-      `;
-      total += amt;
+        `;
+        total += amt;
+      }
     } else {
       html += `
         <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 12px;">
@@ -12721,7 +15447,7 @@ function getBankBookHTML() {
     }
     if (accountFilter !== 'ALL') {
       const filterLower = accountFilter.toLowerCase();
-      const accLower = (tx.account || '').toLowerCase();
+      const accLower = (tx.account || tx.accountName || tx.account_name || tx.bankAccount || tx.bank_account || '').toLowerCase();
       const isFD = filterLower.includes('fixed deposit') || filterLower.includes('fd');
       const txIsFD = accLower.includes('fixed deposit') || accLower.includes('fd');
       if (isFD !== txIsFD) return false;
@@ -12817,24 +15543,40 @@ function getBankBookHTML() {
       });
       let txFullDesc = finalParts.join(' - ') || '-';
 
+      const txSplitList = (Array.isArray(tx.splitItems) && tx.splitItems.length > 0)
+        ? tx.splitItems
+        : ((Array.isArray(tx._splitItems) && tx._splitItems.length > 0) ? tx._splitItems : null);
+
       if (!rawBaseVrMap[groupingKey] || isBlankVr) {
         const newTx = Object.assign({}, tx);
         newTx.displayVr = isBlankVr ? '-' : rawVr;
         newTx.allVrNos = rawVr ? [rawVr] : [];
         newTx.amount = Number(tx.amount || tx.receipt || tx.payment || tx.payments || 0);
         newTx.description = txFullDesc;
+        newTx._splitItems = txSplitList ? [...txSplitList] : [tx];
         if (!isBlankVr) rawBaseVrMap[groupingKey] = newTx;
         groupedRawList.push(newTx);
       } else {
-        rawBaseVrMap[groupingKey].amount += Number(tx.amount || tx.receipt || tx.payment || tx.payments || 0);
-        if (rawVr && !rawBaseVrMap[groupingKey].allVrNos.includes(rawVr)) {
-          rawBaseVrMap[groupingKey].allVrNos.push(rawVr);
+        const target = rawBaseVrMap[groupingKey];
+        target.amount += Number(tx.amount || tx.receipt || tx.payment || tx.payments || 0);
+        if (rawVr && !target.allVrNos.includes(rawVr)) {
+          target.allVrNos.push(rawVr);
         }
-        const currentDesc = rawBaseVrMap[groupingKey].description || '';
-        const newDesc = tx.description || tx.particulars || '';
-        if (newDesc && !currentDesc.includes(newDesc)) {
-          rawBaseVrMap[groupingKey].description = currentDesc ? currentDesc + ' + ' + newDesc : newDesc;
+        if (txSplitList) {
+          if (!target._splitItems) target._splitItems = [];
+          target._splitItems.push(...txSplitList);
+        } else {
+          if (!target._splitItems) target._splitItems = [];
+          target._splitItems.push(tx);
         }
+      }
+    });
+
+    groupedRawList.forEach(tx => {
+      if (Array.isArray(tx._splitItems) && tx._splitItems.length > 1) {
+        tx.description = formatSplitItemsDescription(tx._splitItems);
+      } else if (Array.isArray(tx.splitItems) && tx.splitItems.length > 1) {
+        tx.description = formatSplitItemsDescription(tx.splitItems);
       }
     });
 
@@ -13187,8 +15929,551 @@ function formatPaperCurrency(num) {
   return n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+// Helper: Resolve canonical member from membersDataStore using raw name & optional address
+function findCanonicalMember(rawName, directAddress = '') {
+  if (!rawName) return null;
+  const s = String(rawName).trim();
+  if (!s || s === '-' || s === '--' || s.toLowerCase() === 'unknown' || s.toLowerCase().includes('opening balance') || s.toLowerCase().includes('inter-bank')) return null;
+
+  if (typeof membersDataStore === 'undefined' || !Array.isArray(membersDataStore)) return null;
+
+  const sLower = s.toLowerCase();
+  const cleanRaw = (typeof getRawName === 'function' ? getRawName(s) : s.replace(/^(Brother|Sister|Pastor|Evangelist|Bro|Sis|Br|Sr|Pr|Evg)\.?\s+/i, '')).toLowerCase().trim();
+  const dAddr = (directAddress || '').toLowerCase().trim();
+
+  // If directAddress is provided, prioritize match on both name AND address!
+  if (dAddr && dAddr !== '-' && dAddr !== 'not specified' && dAddr !== 'no address') {
+    const bothMatch = membersDataStore.find(m => {
+      if (!m || !m.name) return false;
+      const mn = m.name.toLowerCase().trim();
+      const mr = (typeof getRawName === 'function' ? getRawName(mn) : mn).toLowerCase().trim();
+      const ma = (m.address || '').toLowerCase().trim();
+      const nameMatch = (mn === sLower || mr === cleanRaw || (m._aliases && m._aliases.includes(sLower)));
+      const addrMatch = (ma === dAddr || ma.includes(dAddr) || dAddr.includes(ma));
+      return nameMatch && addrMatch;
+    });
+    if (bothMatch) return bothMatch;
+  }
+
+  // 1. Exact match on full name
+  let exact = membersDataStore.find(m => m && m.name && m.name.toLowerCase().trim() === sLower);
+  if (exact) return exact;
+
+  // 2. Match ignoring title prefix (Brother, Sister, Pr., Br., Sr., etc.)
+  if (!cleanRaw) return null;
+
+  const titleMatches = membersDataStore.filter(m => {
+    if (!m || !m.name) return false;
+    const mRaw = (typeof getRawName === 'function' ? getRawName(m.name) : m.name.replace(/^(Brother|Sister|Pastor|Evangelist|Bro|Sis|Br|Sr|Pr|Evg)\.?\s+/i, '')).toLowerCase().trim();
+    return mRaw === cleanRaw;
+  });
+
+  if (titleMatches.length === 1) return titleMatches[0];
+  if (titleMatches.length > 1) {
+    if (dAddr) {
+      const addrMatch = titleMatches.find(m => m.address && (m.address.toLowerCase().trim() === dAddr || m.address.toLowerCase().includes(dAddr) || dAddr.includes(m.address.toLowerCase())));
+      if (addrMatch) return addrMatch;
+    }
+    return titleMatches[0];
+  }
+
+  // 3. Match nickname or alias if available
+  const nickMatch = membersDataStore.find(m => m && m.nickname && m.nickname.toLowerCase().trim() === cleanRaw);
+  if (nickMatch) return nickMatch;
+
+  return null;
+}
+
+function normalizeMemberName(name) {
+  if (!name) return '';
+  return (typeof getRawName === 'function' ? getRawName(name) : String(name).replace(/^(Brother|Sister|Pastor|Evangelist|Bro|Sis|Br|Sr|Pr|Evg)\.?\s+/i, '')).toLowerCase().trim();
+}
+
+function getMemberAddress(name) {
+  const m = findCanonicalMember(name);
+  return m && m.address ? m.address.trim() : '';
+}
+
+function formatSubMonthWithYear(subM, txDate) {
+  if (!subM) return '';
+  const trimmed = String(subM).trim();
+  const match = trimmed.match(/(January|February|March|April|May|June|July|August|September|October|November|December)(?:\s*(\d{4}))?/i);
+  if (match) {
+    const mName = match[1].charAt(0).toUpperCase() + match[1].slice(1).toLowerCase();
+    let yVal = match[2];
+    if (!yVal) {
+      if (txDate) {
+        const d = new Date(txDate);
+        if (!isNaN(d.getTime())) yVal = d.getFullYear();
+      }
+      if (!yVal && typeof currentGlobalFY !== 'undefined' && currentGlobalFY && currentGlobalFY !== 'All') {
+        const parts = currentGlobalFY.split('-');
+        if (parts.length === 2) {
+          const mIdx = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"].indexOf(mName);
+          yVal = (mIdx < 3) ? parts[1] : parts[0];
+        }
+      }
+      if (!yVal) yVal = '2026';
+    }
+    return `${mName} ${yVal}`;
+  }
+  return trimmed;
+}
+
 // ============================================================
 // --- SUBSCRIPTIONS REPORT ---
+function getSubscriptionReceiptsPool() {
+  const pool = [];
+  const seenKeys = new Set();
+
+  function resolveMemberInfo(rawName, directAddress = '') {
+    let name = (rawName && rawName !== '-' && rawName !== '--') ? String(rawName).trim() : '';
+    let addr = (directAddress && directAddress !== '-' && directAddress !== '--') ? String(directAddress).trim() : '';
+
+    if (name) {
+      const canonical = findCanonicalMember(name, addr);
+      if (canonical) {
+        name = canonical.name;
+        if (!addr && canonical.address) addr = canonical.address.trim();
+      }
+    }
+    if (!addr && name) {
+      addr = getMemberAddress(name) || '';
+    }
+    return { name, addr };
+  }
+
+  // 1. Process General (Cash Book) Transactions
+  (currentGeneralTxList || []).forEach(tx => {
+    const amt = Number(tx.receipt || tx.amount || 0);
+    const mode = (tx.mode || '').toLowerCase();
+    const typeStr = (tx.type || tx.category || '').toLowerCase();
+    const catStr = (tx.category || '').toLowerCase();
+    const subStr = (tx.subtype || '').toLowerCase();
+    const descStr = (tx.description || tx.particulars || '').toLowerCase();
+    const nameStr = (tx.accountName || tx.account_name || tx.name || '').toLowerCase();
+
+    const isContra = (descStr.includes('contra') || subStr.includes('contra') || descStr.includes('cash deposit') || descStr.includes('cash withdrawal'));
+    if (isContra) return;
+
+    const isPayment = (mode.includes('payment') || mode.includes('debit')) && !mode.includes('receipt') && !mode.includes('credit');
+    const isReceipt = ((amt > 0) || (mode === 'receipt') || mode.includes('credit')) && !isPayment;
+    if (!isReceipt) return;
+
+    const fullText = (tx.particulars || tx.description || '').trim();
+    let memberName = (tx.accountName && tx.accountName !== '-' && tx.accountName !== '--') ? tx.accountName.trim() : '';
+
+    // If accountName is missing or dash, try extracting from fullText before " - "
+    if (!memberName && fullText.includes(' - ')) {
+      const dashIdx = fullText.indexOf(' - ');
+      const cand = fullText.substring(0, dashIdx).trim();
+      const candLower = cand.toLowerCase();
+      if (!candLower.includes('contra') && !candLower.includes('transfer') && !candLower.includes('cash deposit') && !candLower.includes('opening balance')) {
+        memberName = cand;
+      }
+    }
+
+    // Resolve member name and address canonically
+    const resolved = resolveMemberInfo(memberName, tx.address);
+    if (resolved.name) memberName = resolved.name;
+    const resolvedAddr = resolved.addr || tx.address || '';
+
+    // Check if Cash Transaction has split items
+    if (tx.splitGroupId && seenKeys.has(`c_splitgroup_${tx.splitGroupId}`)) return;
+
+    const splitItems = (Array.isArray(tx.splitItems) && tx.splitItems.length > 0)
+      ? tx.splitItems
+      : ((Array.isArray(tx._splitItems) && tx._splitItems.length > 0) ? tx._splitItems : null);
+
+    if (splitItems && splitItems.length > 0) {
+      if (tx.splitGroupId) seenKeys.add(`c_splitgroup_${tx.splitGroupId}`);
+      splitItems.forEach((item, pIdx) => {
+        const itemType = (item.type || item.category || item.subtype || '').toLowerCase();
+        const itemDesc = (item.description || item.particulars || item.desc || '').toLowerCase();
+        const itemMonth = (item.month || item.subMonth || item.sub_month || '').trim();
+        const isNotSub = itemType.includes('offering') || itemType.includes('offertory') || itemDesc.includes('offering') || itemDesc.includes('offertory') || itemType.includes('charity') || itemDesc.includes('charity') || itemType.includes('donation') || itemDesc.includes('donation');
+        const isSubItem = !isNotSub && (itemType.includes('subscription') || (!itemType && itemDesc.includes('subscription')));
+
+        if (isSubItem) {
+          const itemAmt = Number(item.amount || item.receipt || item.amt || item.credit || 0);
+          if (itemAmt > 0) {
+            let subM = itemMonth ? formatSubMonthWithYear(itemMonth, tx.date) : '';
+            if (!subM) subM = formatSubMonthWithYear(itemDesc, tx.date);
+            if (!subM) subM = formatSubMonthWithYear(tx.subMonth, tx.date);
+            if (!subM && tx.date) {
+              const d = new Date(tx.date);
+              if (!isNaN(d.getTime())) {
+                const mNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+                subM = `${mNames[d.getMonth()]} ${d.getFullYear()}`;
+              }
+            }
+
+            let itemMemberName = memberName;
+            let itemAddr = resolvedAddr;
+            if (item.accountName || item.name) {
+              const rItem = resolveMemberInfo(item.accountName || item.name, item.address || resolvedAddr);
+              if (rItem.name) itemMemberName = rItem.name;
+              if (rItem.addr) itemAddr = rItem.addr;
+            }
+
+            const itemKey = `c_${tx.id || tx.vrNo}_split_${pIdx}`;
+            if (!seenKeys.has(itemKey)) {
+              seenKeys.add(itemKey);
+              pool.push({
+                ...tx,
+                id: tx.id ? `${tx.id}_sub_${pIdx}` : undefined,
+                parentTxId: tx.id,
+                accountName: itemMemberName || memberName || tx.accountName,
+                address: itemAddr,
+                amount: itemAmt,
+                receipt: itemAmt,
+                type: 'Subscription',
+                category: 'Subscription',
+                subtype: item.subtype || 'Subscription',
+                subMonth: subM || 'Unknown Month',
+                particulars: item.description || item.desc || tx.particulars || '',
+                description: item.description || item.desc || tx.description || '',
+                isSplitEntry: true
+              });
+            }
+          }
+        }
+      });
+      if (tx.id) seenKeys.add(`c_${tx.id}`);
+      return;
+    }
+
+    // Check if Cash Transaction has text-based '+' split
+    const descVal = (tx.description || tx.particulars || '').trim();
+    if (descVal.includes('+')) {
+      const parts = descVal.split(/\s*\+\s*/);
+      parts.forEach((part, pIdx) => {
+        const partTrimmed = part.trim();
+        const partLower = partTrimmed.toLowerCase();
+        if (!partLower.includes('subscription')) return;
+        const isPartNotSub = partLower.includes('offering') || partLower.includes('offertory') || partLower.includes('charity') || partLower.includes('donation');
+        if (isPartNotSub) return;
+
+        let partMember = memberName;
+        let partClean = partTrimmed;
+        if (partTrimmed.includes(' - ')) {
+          const pDash = partTrimmed.indexOf(' - ');
+          const pCand = partTrimmed.substring(0, pDash).trim();
+          if (pCand && !pCand.toLowerCase().includes('subscription')) {
+            const rPart = resolveMemberInfo(pCand, resolvedAddr);
+            if (rPart.name) partMember = rPart.name;
+            partClean = partTrimmed.substring(pDash + 3).trim();
+          }
+        }
+
+        let itemAmt = 0;
+        const parenMatch = partTrimmed.match(/\((?:[^0-9]*)([0-9]+(?:,[0-9]+)*(?:\.[0-9]+)?)\)/);
+        if (parenMatch) itemAmt = parseFloat(parenMatch[1].replace(/,/g, ''));
+        if (!itemAmt || isNaN(itemAmt)) {
+          const symMatch = partTrimmed.match(/(?:rs\.?|inr|₹)\s*([0-9]+(?:,[0-9]+)*(?:\.[0-9]+)?)/i);
+          if (symMatch) itemAmt = parseFloat(symMatch[1].replace(/,/g, ''));
+        }
+        if (!itemAmt || isNaN(itemAmt)) {
+          const slashMatch = partTrimmed.match(/([0-9]+(?:,[0-9]+)*(?:\.[0-9]+)?)\s*(?:\/-|\/rs)/i);
+          if (slashMatch) itemAmt = parseFloat(slashMatch[1].replace(/,/g, ''));
+        }
+        if (!itemAmt || isNaN(itemAmt)) {
+          const numMatches = partTrimmed.match(/\b([0-9]{3,}(?:,[0-9]+)*(?:\.[0-9]+)?)\b/g);
+          if (numMatches && numMatches.length === 1) {
+            itemAmt = parseFloat(numMatches[0].replace(/,/g, ''));
+          }
+        }
+        if (!itemAmt || isNaN(itemAmt) || itemAmt <= 0) {
+          if (parts.length === 1) itemAmt = amt;
+        }
+
+        let itemMonth = formatSubMonthWithYear(partTrimmed, tx.date);
+        if (!itemMonth && tx.subMonth) itemMonth = formatSubMonthWithYear(tx.subMonth, tx.date);
+        if (!itemMonth && tx.date) {
+          const d = new Date(tx.date);
+          if (!isNaN(d.getTime())) {
+            const mNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+            itemMonth = `${mNames[d.getMonth()]} ${d.getFullYear()}`;
+          }
+        }
+
+        const itemKey = `c_${tx.id || tx.vrNo}_textsplit_${pIdx}`;
+        if (!seenKeys.has(itemKey)) {
+          seenKeys.add(itemKey);
+          pool.push({
+            ...tx,
+            id: tx.id ? `${tx.id}_sub_${pIdx}` : undefined,
+            parentTxId: tx.id,
+            accountName: partMember || memberName || tx.accountName,
+            address: resolvedAddr,
+            amount: itemAmt || amt,
+            receipt: itemAmt || amt,
+            type: 'Subscription',
+            category: 'Subscription',
+            subtype: 'Subscription',
+            particulars: partClean,
+            description: partClean,
+            subMonth: itemMonth || 'Unknown Month',
+            isSplitEntry: true
+          });
+        }
+      });
+      if (tx.id) seenKeys.add(`c_${tx.id}`);
+      return;
+    }
+
+    // Strict exclusion of non-subscription cash categories
+    const hasSubCash = typeStr.includes('subscription') || subStr.includes('subscription') || catStr.includes('subscription') || descStr.includes('subscription');
+    const isExcludedCash = typeStr.includes('offering') || typeStr.includes('offertory') ||
+                           subStr.includes('offering') || subStr.includes('offertory') ||
+                           catStr.includes('offering') || catStr.includes('offertory') ||
+                           nameStr === 'offertory' || nameStr === 'offering' ||
+                           typeStr.includes('charity') || subStr.includes('charity') ||
+                           typeStr.includes('donation') || subStr.includes('donation') ||
+                           typeStr.includes('first fruit') || subStr.includes('first fruit');
+
+    if (isExcludedCash && !hasSubCash) return;
+    if (!hasSubCash) return;
+
+    const key = tx.id ? `c_${tx.id}` : `vr_${tx.vrNo}_${tx.date}_${amt}`;
+    if (!seenKeys.has(key)) {
+      seenKeys.add(key);
+      pool.push({
+        ...tx,
+        accountName: memberName || tx.accountName,
+        address: resolvedAddr || tx.address || ''
+      });
+    }
+  });
+
+  // 2. Process Bank Transactions (including split entries)
+  let bankList = (typeof loadedBankBookTransactions !== 'undefined' && loadedBankBookTransactions && loadedBankBookTransactions.length > 0)
+    ? loadedBankBookTransactions
+    : (typeof allTimeBankBookList !== 'undefined' ? filterListByFY(allTimeBankBookList) : []);
+  if ((!bankList || bankList.length === 0) && typeof globalRawBankTransactions !== 'undefined' && globalRawBankTransactions && globalRawBankTransactions.length > 0) {
+    bankList = filterListByFY(globalRawBankTransactions);
+  }
+
+  (bankList || []).forEach(tx => {
+    const amt = Number(tx.receipt || tx.amount || tx.credit || 0);
+    const mode = (tx.mode || '').toLowerCase();
+    const typeStr = (tx.type || tx.category || tx.bankSubtype || tx.bank_subtype || '').toLowerCase();
+    const subStr = (tx.subtype || tx.subType || tx.bankSubtype || tx.bank_subtype || '').toLowerCase();
+    const descStr = (tx.description || tx.particulars || '').toLowerCase();
+    const nameStr = (tx.accountName || tx.account_name || tx.name || '').toLowerCase();
+
+    const isContra = (descStr.includes('contra') || subStr.includes('contra') || descStr.includes('cash deposit') || descStr.includes('cash withdrawal'));
+    if (isContra) return;
+
+    const isPayment = (mode.includes('payment') || mode.includes('debit') || mode.includes('withdrawal')) && !mode.includes('receipt') && !mode.includes('credit') && !mode.includes('deposit');
+    const isReceipt = ((amt > 0) || mode.includes('credit') || mode.includes('receipt') || mode.includes('deposit')) && !isPayment;
+    if (!isReceipt) return;
+
+    if (tx.id && seenKeys.has(`b_${tx.id}`)) return;
+    const linkedCashId = tx.cashId || tx.cash_id;
+    if (linkedCashId && seenKeys.has(`c_${linkedCashId}`)) return;
+
+    const fullText = (tx.particulars || tx.description || '').trim();
+    let memberName = (tx.accountName && tx.accountName !== '-' && tx.accountName !== '--') ? tx.accountName.trim() : '';
+    let itemsText = fullText;
+
+    // If accountName is missing or dash, try extracting from fullText before " - "
+    if (!memberName && fullText.includes(' - ')) {
+      const dashIdx = fullText.indexOf(' - ');
+      const cand = fullText.substring(0, dashIdx).trim();
+      const candLower = cand.toLowerCase();
+      if (!candLower.includes('contra') && !candLower.includes('transfer') && !candLower.includes('cash deposit') && !candLower.includes('opening balance')) {
+        memberName = cand;
+        itemsText = fullText.substring(dashIdx + 3).trim();
+      }
+    }
+
+    // Resolve member name and address canonically
+    const resolved = resolveMemberInfo(memberName, tx.address);
+    if (resolved.name) memberName = resolved.name;
+    const resolvedAddr = resolved.addr || tx.address || '';
+
+    // Case A: Array-based split items on Bank Transaction (tx.splitItems / tx._splitItems)
+    const splitItems = (Array.isArray(tx.splitItems) && tx.splitItems.length > 0)
+      ? tx.splitItems
+      : ((Array.isArray(tx._splitItems) && tx._splitItems.length > 0) ? tx._splitItems : null);
+
+    if (splitItems && splitItems.length > 0) {
+      splitItems.forEach((item, pIdx) => {
+        const itemType = (item.type || item.category || item.subtype || '').toLowerCase();
+        const itemDesc = (item.description || item.particulars || item.desc || '').toLowerCase();
+        const itemMonth = (item.month || item.subMonth || item.sub_month || '').trim();
+        const isNotSub = itemType.includes('offering') || itemType.includes('offertory') || itemDesc.includes('offering') || itemDesc.includes('offertory') || itemType.includes('charity') || itemDesc.includes('charity') || itemType.includes('donation') || itemDesc.includes('donation');
+        const isSubItem = !isNotSub && (itemType.includes('subscription') || (!itemType && itemDesc.includes('subscription')));
+
+        if (isSubItem) {
+          const itemAmt = Number(item.amount || item.receipt || item.credit || item.amt || 0);
+          if (itemAmt > 0) {
+            let finalMonth = itemMonth ? formatSubMonthWithYear(itemMonth, tx.date) : '';
+            if (!finalMonth) finalMonth = formatSubMonthWithYear(itemDesc, tx.date);
+            if (!finalMonth && tx.subMonth) finalMonth = formatSubMonthWithYear(tx.subMonth, tx.date);
+            if (!finalMonth && tx.date) {
+              const d = new Date(tx.date);
+              if (!isNaN(d.getTime())) {
+                const mNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+                finalMonth = `${mNames[d.getMonth()]} ${d.getFullYear()}`;
+              }
+            }
+
+            const itemKey = `b_${tx.id || tx.vrNo}_split_${pIdx}`;
+            if (!seenKeys.has(itemKey)) {
+              seenKeys.add(itemKey);
+              pool.push({
+                ...tx,
+                id: tx.id ? `${tx.id}_sub_${pIdx}` : undefined,
+                parentBankTxId: tx.id,
+                vrNo: tx.vrNo,
+                date: tx.date,
+                accountName: memberName || tx.accountName,
+                address: resolvedAddr,
+                amount: itemAmt,
+                receipt: itemAmt,
+                credit: itemAmt,
+                type: 'Subscription',
+                category: 'Subscription',
+                subtype: item.subtype || 'Subscription',
+                subMonth: finalMonth || 'Unknown Month',
+                particulars: item.description || item.desc || tx.particulars || '',
+                description: item.description || item.desc || tx.description || '',
+                isBankEntry: true,
+                isSplitEntry: true
+              });
+            }
+          }
+        }
+      });
+
+      if (tx.id) seenKeys.add(`b_${tx.id}`);
+      return;
+    }
+
+    // Case B: Text-based split entries with '+' in particulars / description
+    if (itemsText.includes('+')) {
+      const parts = itemsText.split(/\s*\+\s*/);
+
+      parts.forEach((part, pIdx) => {
+        const partTrimmed = part.trim();
+        const partLower = partTrimmed.toLowerCase();
+        if (!partLower.includes('subscription')) return;
+        const isPartNotSub = partLower.includes('offering') || partLower.includes('offertory') || partLower.includes('charity') || partLower.includes('donation');
+        if (isPartNotSub) return;
+
+        let itemAmt = 0;
+        // Match numbers in parentheses: (1000) or (1,000) or (Rs.1000)
+        const parenMatch = partTrimmed.match(/\((?:[^0-9]*)([0-9]+(?:,[0-9]+)*(?:\.[0-9]+)?)\)/);
+        if (parenMatch) {
+          itemAmt = parseFloat(parenMatch[1].replace(/,/g, ''));
+        }
+        if (!itemAmt || isNaN(itemAmt)) {
+          const symMatch = partTrimmed.match(/(?:rs\.?|inr|₹)\s*([0-9]+(?:,[0-9]+)*(?:\.[0-9]+)?)/i);
+          if (symMatch) itemAmt = parseFloat(symMatch[1].replace(/,/g, ''));
+        }
+        if (!itemAmt || isNaN(itemAmt)) {
+          const slashMatch = partTrimmed.match(/([0-9]+(?:,[0-9]+)*(?:\.[0-9]+)?)\s*(?:\/-|\/rs)/i);
+          if (slashMatch) itemAmt = parseFloat(slashMatch[1].replace(/,/g, ''));
+        }
+        if (!itemAmt || isNaN(itemAmt)) {
+          const numMatches = partTrimmed.match(/\b([0-9]{3,}(?:,[0-9]+)*(?:\.[0-9]+)?)\b/g);
+          if (numMatches && numMatches.length === 1) {
+            itemAmt = parseFloat(numMatches[0].replace(/,/g, ''));
+          }
+        }
+        if (!itemAmt || isNaN(itemAmt) || itemAmt <= 0) {
+          if (parts.length === 1) itemAmt = amt;
+        }
+
+        let itemMonth = formatSubMonthWithYear(partTrimmed, tx.date);
+        if (!itemMonth && tx.subMonth) itemMonth = formatSubMonthWithYear(tx.subMonth, tx.date);
+        if (!itemMonth && tx.date) {
+          const d = new Date(tx.date);
+          if (!isNaN(d.getTime())) {
+            const mNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+            itemMonth = `${mNames[d.getMonth()]} ${d.getFullYear()}`;
+          }
+        }
+
+        const itemKey = `b_${tx.id || tx.vrNo}_textsplit_${pIdx}`;
+        if (!seenKeys.has(itemKey)) {
+          seenKeys.add(itemKey);
+          pool.push({
+            ...tx,
+            id: tx.id ? `${tx.id}_sub_${pIdx}` : undefined,
+            parentBankTxId: tx.id,
+            vrNo: tx.vrNo,
+            date: tx.date,
+            accountName: memberName || tx.accountName,
+            address: resolvedAddr,
+            amount: itemAmt || amt,
+            receipt: itemAmt || amt,
+            credit: itemAmt || amt,
+            type: 'Subscription',
+            category: 'Subscription',
+            subtype: 'Subscription',
+            particulars: partTrimmed,
+            description: partTrimmed,
+            subMonth: itemMonth || 'Unknown Month',
+            isBankEntry: true,
+            isSplitEntry: true
+          });
+        }
+      });
+
+      if (tx.id) seenKeys.add(`b_${tx.id}`);
+      return;
+    }
+
+    // Case C: Standard single bank transaction
+    const hasSubBank = typeStr.includes('subscription') || subStr.includes('subscription') || descStr.includes('subscription');
+    const isExcludedBank = typeStr.includes('offering') || typeStr.includes('offertory') ||
+                           subStr.includes('offering') || subStr.includes('offertory') ||
+                           nameStr === 'offertory' || nameStr === 'offering' ||
+                           typeStr.includes('charity') || subStr.includes('charity') ||
+                           typeStr.includes('donation') || subStr.includes('donation') ||
+                           typeStr.includes('first fruit') || subStr.includes('first fruit');
+
+    if (isExcludedBank && !hasSubBank) return;
+    if (!hasSubBank) return;
+
+    if (hasSubBank) {
+      let subMonth = formatSubMonthWithYear(tx.subMonth, tx.date);
+      if (!subMonth && fullText) {
+        subMonth = formatSubMonthWithYear(fullText, tx.date);
+      }
+      if (!subMonth && tx.date) {
+        const d = new Date(tx.date);
+        if (!isNaN(d.getTime())) {
+          const mNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+          subMonth = `${mNames[d.getMonth()]} ${d.getFullYear()}`;
+        }
+      }
+
+      const key = tx.id ? `b_${tx.id}` : `bvr_${tx.vrNo}_${tx.date}_${amt}`;
+      if (!seenKeys.has(key)) {
+        seenKeys.add(key);
+        pool.push({
+          ...tx,
+          accountName: memberName || tx.accountName,
+          address: resolvedAddr,
+          amount: amt,
+          receipt: amt,
+          credit: amt,
+          type: 'Subscription',
+          category: 'Subscription',
+          subMonth: subMonth || 'Unknown Month',
+          isBankEntry: true
+        });
+      }
+    }
+  });
+
+  return pool;
+}
+
 function renderSubscriptionsReport() {
   // Get predefined months from the dropdown to ensure FY months always show even if empty
   const predefinedMonths = [];
@@ -13199,32 +16484,35 @@ function renderSubscriptionsReport() {
     });
   }
 
-  const receipts = currentGeneralTxList.filter(tx => {
-    const amt = Number(tx.receipt || tx.amount || 0);
-    const mode = (tx.mode || '').toLowerCase();
-    const typeStr = (tx.type || '').toLowerCase();
-    const subStr = (tx.subtype || '').toLowerCase();
-    const descStr = (tx.description || '').toLowerCase();
-
-    const isContra = (descStr.includes('contra') || subStr.includes('contra') || descStr.includes('cash deposit') || descStr.includes('cash withdrawal'));
-    const isSubscription = typeStr.includes('subscription') && !isContra;
-    const isReceipt = (amt > 0) || (mode === 'receipt');
-
-    return isReceipt && isSubscription;
-  });
+  const receipts = getSubscriptionReceiptsPool();
 
   const memberMap = {};
   const dbMonths = new Set(predefinedMonths);
 
   receipts.forEach(tx => {
     let memberName = (tx.accountName && tx.accountName !== '-') ? tx.accountName : (tx.name && tx.name !== '-' ? tx.name : 'Unknown');
-    memberName = memberName.trim();
+    memberName = String(memberName).trim();
     if (memberName === 'Inter-Bank Transfer' || memberName.toLowerCase().includes('opening balance') || memberName === 'Unknown' || memberName.toLowerCase().includes('ipc horeb church')) return;
 
     let addr = (tx.address || '').trim();
+    const canonical = findCanonicalMember(memberName, addr);
+    if (canonical) {
+      memberName = canonical.name;
+      if (!addr && canonical.address) addr = canonical.address.trim();
+    }
+    if (!addr) {
+      addr = getMemberAddress(memberName) || '';
+    }
+    if (!addr && typeof activeMembersMap !== 'undefined' && activeMembersMap[memberName.toLowerCase()]) {
+      addr = activeMembersMap[memberName.toLowerCase()] || '';
+    }
+
     let mapKey = memberName + '|||' + addr;
 
     let subM = (tx.subMonth || '').trim();
+    if (!subM && (tx.particulars || tx.description)) {
+      subM = formatSubMonthWithYear(tx.particulars || tx.description, tx.date);
+    }
     if (!subM && tx.date) {
       const d = new Date(tx.date);
       if (!isNaN(d.getTime())) {
@@ -13240,7 +16528,7 @@ function renderSubscriptionsReport() {
     }
     if (!memberMap[mapKey][subM]) memberMap[mapKey][subM] = 0;
 
-    const amt = Number(tx.receipt || tx.amount || 0);
+    const amt = Number(tx.receipt || tx.credit || tx.amount || 0);
     memberMap[mapKey][subM] += amt;
     memberMap[mapKey].Total += amt;
   });
@@ -13272,8 +16560,6 @@ function renderSubscriptionsReport() {
   const tbody = document.getElementById('subscriptionsReportBody');
   let bodyHtml = '';
   let slNo = 1;
-
-  // We no longer pull all registered membe Only members with actual payments will appear.
 
   let sortedMembers = Object.keys(memberMap).sort((a, b) => {
     const res = compareNamesIgnoringPrefix(memberMap[a].memberName, memberMap[b].memberName);
@@ -13348,22 +16634,30 @@ function showSubscriptionDetails(memberName, address, subMonth) {
   monthEl.innerText = subMonth;
   tableBody.innerHTML = '';
 
-  const receipts = currentGeneralTxList.filter(tx => {
-    const amt = Number(tx.receipt || tx.amount || 0);
-    const mode = (tx.mode || '').toLowerCase();
-    const typeStr = (tx.type || '').toLowerCase();
-    const subStr = (tx.subtype || '').toLowerCase();
-    const descStr = (tx.description || '').toLowerCase();
+  const cleanTarget = normalizeMemberName(memberName);
 
-    const isContra = (descStr.includes('contra') || subStr.includes('contra') || descStr.includes('cash deposit') || descStr.includes('cash withdrawal'));
-    const isSubscription = typeStr.includes('subscription') && !isContra;
-    const isReceipt = (amt > 0) || (mode === 'receipt');
-
+  const receipts = getSubscriptionReceiptsPool().filter(tx => {
     let txMemberName = (tx.accountName && tx.accountName !== '-') ? tx.accountName : (tx.name && tx.name !== '-' ? tx.name : 'Unknown');
-    txMemberName = txMemberName.trim();
+    txMemberName = String(txMemberName).trim();
     let txAddr = (tx.address || '').trim();
 
+    const canonical = findCanonicalMember(txMemberName, txAddr);
+    if (canonical) {
+      txMemberName = canonical.name;
+      if (!txAddr && canonical.address) txAddr = canonical.address.trim();
+    }
+    if (!txAddr) {
+      txAddr = getMemberAddress(txMemberName) || '';
+    }
+
+    const cleanTx = normalizeMemberName(txMemberName);
+    const memberMatches = (txMemberName === memberName) || (cleanTx === cleanTarget);
+    const addrMatches = !address || !txAddr || (txAddr === address) || txAddr.includes(address) || address.includes(txAddr);
+
     let txSubM = (tx.subMonth || '').trim();
+    if (!txSubM && (tx.particulars || tx.description)) {
+      txSubM = formatSubMonthWithYear(tx.particulars || tx.description, tx.date);
+    }
     if (!txSubM && tx.date) {
       const d = new Date(tx.date);
       if (!isNaN(d.getTime())) {
@@ -13373,7 +16667,7 @@ function showSubscriptionDetails(memberName, address, subMonth) {
     }
     if (!txSubM) txSubM = 'Unknown Month';
 
-    return isReceipt && isSubscription && (txMemberName === memberName) && (txAddr === address) && (txSubM === subMonth);
+    return memberMatches && addrMatches && (txSubM === subMonth);
   });
 
   if (receipts.length === 0) {
@@ -13385,12 +16679,20 @@ function showSubscriptionDetails(memberName, address, subMonth) {
         dateStr = formatDateDisplay(tx.date) || dateStr;
       }
       const vrNoStr = tx.vrNo || '-';
-      const amt = Number(tx.receipt || tx.amount || 0);
+      const isBank = !!(tx.isBankEntry || (tx.vrNo && String(tx.vrNo).endsWith('/B')) || tx.entryType === 'Bank');
+      const amt = Number(tx.receipt || tx.credit || tx.amount || 0);
+      const splitNote = (tx.isSplitEntry && (tx.particulars || tx.description)) ? `<div style="font-size:0.75rem; color:#64748b; margin-top:2px;">${tx.particulars || tx.description}</div>` : '';
 
       tableBody.innerHTML += `
             <tr style="border-bottom: 1px solid #e2e8f0;">
-              <td style="padding: 8px;">${dateStr}</td>
-              <td style="padding: 8px; text-align: center; font-family: monospace;">${vrNoStr}</td>
+              <td style="padding: 8px;">
+                ${dateStr}
+                ${splitNote}
+              </td>
+              <td style="padding: 8px; text-align: center; font-family: monospace;">
+                ${vrNoStr}
+                ${isBank ? '<span style="font-size: 0.65rem; background: #dbeafe; color: #1e40af; padding: 1px 4px; border-radius: 4px; margin-left: 4px; font-weight: 700;">BANK</span>' : ''}
+              </td>
               <td style="padding: 8px; text-align: right; font-weight: 600; color: #059669;">${formatCurrencyNoSymbol(amt)}</td>
             </tr>
           `;
@@ -13496,21 +16798,44 @@ function renderMemberStatementReport() {
   if (fromDate) fromDate.setHours(0, 0, 0, 0);
   if (toDate) toDate.setHours(23, 59, 59, 999);
 
-  const receipts = allTimeGeneralTxList.filter(tx => {
-    const amt = Number(tx.receipt || 0);
+  const combinedTxs = [];
+  const seenStmtKeys = new Set();
+  (allTimeGeneralTxList || []).forEach(tx => {
+    if (tx.id) seenStmtKeys.add(`c_${tx.id}`);
+    combinedTxs.push(tx);
+  });
+  (allTimeBankBookList || []).forEach(tx => {
+    if (tx.id && seenStmtKeys.has(`b_${tx.id}`)) return;
+    const linkedCashId = tx.cashId || tx.cash_id;
+    if (linkedCashId && seenStmtKeys.has(`c_${linkedCashId}`)) return;
+    if (tx.id) seenStmtKeys.add(`b_${tx.id}`);
+    combinedTxs.push({
+      ...tx,
+      receipt: Number(tx.receipt || tx.credit || 0),
+      payment: Number(tx.payment || tx.debit || 0),
+      amount: Number(tx.amount || tx.receipt || tx.credit || 0),
+      isBankEntry: true
+    });
+  });
+
+  const receipts = combinedTxs.filter(tx => {
+    const amt = Number(tx.receipt || tx.credit || 0);
     const mode = String(tx.mode || '').toLowerCase();
     const typeStr = String(tx.type || '').toLowerCase();
     const subStr = String(tx.subtype || '').toLowerCase();
-    const descStr = String(tx.description || '').toLowerCase();
-    const combinedStr = typeStr + ' ' + subStr + ' ' + descStr;
+    const bSubStr = String(tx.bankSubtype || tx.bank_subtype || '').toLowerCase();
+    const descStr = String(tx.description || tx.particulars || '').toLowerCase();
+    const combinedStr = typeStr + ' ' + subStr + ' ' + bSubStr + ' ' + descStr;
 
-    // Exclude offerings and bank transfers from Member Statement
-    if (combinedStr.includes('offering') || combinedStr.includes('offertory') || combinedStr.includes('bank') || combinedStr.includes('contra') || combinedStr.includes('transfer')) {
+    // Exclude offerings and internal bank transfers/contra/interest from Member Statement
+    if (combinedStr.includes('offering') || combinedStr.includes('offertory') || combinedStr.includes('contra') ||
+        combinedStr.includes('inter-bank transfer') || combinedStr.includes('bank interest') || combinedStr.includes('bank charges') ||
+        descStr.includes('cash deposit') || descStr.includes('cash withdrawal')) {
       return false;
     }
 
     // Include if mode is Receipt OR if receipt amount > 0 OR if type is recognized as income
-    const isReceipt = (amt > 0) || (mode === 'receipt') || combinedStr.includes('subscription') || combinedStr.includes('charity') || combinedStr.includes('donation') || combinedStr.includes('first fruit') || combinedStr.includes('anniversary') || combinedStr.includes('sodari');
+    const isReceipt = (amt > 0) || (mode.includes('receipt') || mode.includes('credit')) || combinedStr.includes('subscription') || combinedStr.includes('charity') || combinedStr.includes('donation') || combinedStr.includes('first fruit') || combinedStr.includes('anniversary') || combinedStr.includes('sodari');
 
     if (!isReceipt) return false;
 
@@ -13992,22 +17317,56 @@ function printCashBook() {
 
 
 
+function getLedgerPool() {
+  let generalList = currentGeneralTxList;
+  if (!generalList || generalList.length === 0) {
+    if (typeof allTimeGeneralTxList !== 'undefined' && allTimeGeneralTxList.length > 0) {
+      currentGeneralTxList = filterListByFY(allTimeGeneralTxList);
+      generalList = currentGeneralTxList;
+    }
+  }
+
+  let bankList = (typeof loadedBankBookTransactions !== 'undefined' && loadedBankBookTransactions.length > 0)
+    ? loadedBankBookTransactions
+    : (typeof allTimeBankBookList !== 'undefined' ? filterListByFY(allTimeBankBookList) : []);
+
+  return getLedgerPoolForLists(generalList, bankList);
+}
+
 function getLedgerHTML() {
   const filterVal = document.getElementById('ledgerSubtypeFilter') ? document.getElementById('ledgerSubtypeFilter').value : 'ALL';
   const searchVal = (document.getElementById('ledgerSearchInput') ? document.getElementById('ledgerSearchInput').value : '').toLowerCase().trim();
+  const filterNorm = (filterVal !== 'ALL') ? normalizeLedgerName(filterVal) : '';
 
   let totalAmt = 0;
-  const ledgerList = currentGeneralTxList.filter(tx => {
-    if (tx.type !== 'Ledger') return false;
-    const matchesFilter = filterVal === 'ALL' || (tx.subtype && tx.subtype.toLowerCase() === filterVal.toLowerCase()) || (tx.description && tx.description.toLowerCase().includes(filterVal.toLowerCase()));
-    if (!matchesFilter) return false;
+  const pool = getLedgerPool();
+  const ledgerList = pool.filter(tx => {
+    const head = getCanonicalLedgerHead(tx);
+    const headNorm = normalizeLedgerName(head);
+    const catNorm = normalizeLedgerName(tx.category || '');
+    const subNorm = normalizeLedgerName(tx.subtype || tx.subType || tx.bank_subtype || tx.bankSubtype || '');
+
+    if (filterVal !== 'ALL') {
+      const matches = (
+        headNorm === filterNorm || headNorm.includes(filterNorm) || filterNorm.includes(headNorm) ||
+        (catNorm && (catNorm === filterNorm || catNorm.includes(filterNorm) || filterNorm.includes(catNorm))) ||
+        (subNorm && (subNorm === filterNorm || subNorm.includes(filterNorm) || filterNorm.includes(subNorm)))
+      );
+      if (!matches) return false;
+    }
+
     if (searchVal) {
       const accName = (tx.accountName || '').toLowerCase();
-      const desc = (tx.description || '').toLowerCase();
+      const desc = (tx.description || tx.particulars || '').toLowerCase();
       const vrNo = String(tx.vrNo || '').toLowerCase();
-      const sub = (tx.subtype || '').toLowerCase();
-      if (!accName.includes(searchVal) && !desc.includes(searchVal) && !vrNo.includes(searchVal) && !sub.includes(searchVal)) return false;
+      const sub = (tx.subtype || tx.bank_subtype || '').toLowerCase();
+      const cat = (tx.category || '').toLowerCase();
+      const h = head.toLowerCase();
+      if (!accName.includes(searchVal) && !desc.includes(searchVal) && !vrNo.includes(searchVal) && !sub.includes(searchVal) && !h.includes(searchVal) && !cat.includes(searchVal)) {
+        return false;
+      }
     }
+
     return true;
   });
 
@@ -14018,19 +17377,19 @@ function getLedgerHTML() {
     '<tbody><tr><td style="border: none !important; padding: 0;">' +
     '<table>' +
     '<thead>' +
-    '<tr><th>Date</th><th>Vr No</th><th>Description</th><th>Subtype</th><th style="text-align:right">Amount (₹)</th></tr></thead>' +
+    '<tr><th>Date</th><th>Vr No</th><th>Description</th><th>Category</th><th style="text-align:right">Amount (₹)</th></tr></thead>' +
     '<tbody>';
 
   sortTransactionsAscending(ledgerList).forEach(tx => {
-    const cleanDate = formatDateClean(tx.date);
     const cleanVr = formatVrNoClean(tx.vrNo);
-    const amt = tx.payment || tx.receipt || 0;
+    const amt = Number(tx.payment || tx.debit || tx.amount || tx.receipt || 0);
+    const head = getCanonicalLedgerHead(tx);
     totalAmt += amt;
     html += '<tr>' +
       '<td>' + formatDateHtml(tx.date) + '</td>' +
       '<td style="text-align:center">' + cleanVr + '</td>' +
-      '<td>' + (tx.description || '-') + '</td>' +
-      '<td>' + (tx.subtype || tx.description || 'Ledger') + '</td>' +
+      '<td>' + (tx.description || tx.particulars || '-') + '</td>' +
+      '<td>' + (tx.category || tx.subtype || head) + '</td>' +
       '<td class="print-pmt-amt" style="text-align:right">' + formatCurrency(amt) + '</td>' +
       '</tr>';
   });
@@ -14069,13 +17428,12 @@ function printLedger() {
 }
 
 function getLedgerAllHTML() {
-  const ledgerList = currentGeneralTxList.filter(function (tx) { return tx.type === 'Ledger'; });
-
+  const pool = getLedgerPool();
   var grouped = {};
-  ledgerList.forEach(function (tx) {
-    var sub = (tx.subtype || '').trim() || 'General Expenses';
-    if (!grouped[sub]) grouped[sub] = [];
-    grouped[sub].push(tx);
+  pool.forEach(function (tx) {
+    var head = getCanonicalLedgerHead(tx);
+    if (!grouped[head]) grouped[head] = [];
+    grouped[head].push(tx);
   });
 
   var html = '<table style="width: 100%; border: none !important; margin: 0; padding: 0;">' +
@@ -14094,7 +17452,7 @@ function getLedgerAllHTML() {
 
   sortedSubtypes.forEach(function (subtype) {
     var list = grouped[subtype];
-    var subTotal = list.reduce(function (sum, tx) { return sum + Number(tx.payment || tx.receipt || 0); }, 0);
+    var subTotal = list.reduce(function (sum, tx) { return sum + Number(tx.payment || tx.debit || tx.amount || tx.receipt || 0); }, 0);
     html += '<div class="print-section-head" style="background: #f1f5f9; color: #0f172a; padding: 6px 10px; font-weight: 800; font-size: 9pt; margin-top: 14px; border: 1px solid #cbd5e1; border-radius: 4px; display: flex; justify-content: space-between; align-items: center;">' +
       '<span>📌 ' + subtype + ' (' + list.length + ' Entries)</span>' +
       '<span>Total: ' + formatCurrency(subTotal) + '</span>' +
@@ -14103,10 +17461,9 @@ function getLedgerAllHTML() {
       '<thead><tr><th>Date</th><th>Vr No</th><th>Name / Description</th><th style="text-align:right">Amount</th></tr></thead>' +
       '<tbody>';
     sortTransactionsAscending(list).forEach(function (tx) {
-      var cleanDate = formatDateClean(tx.date);
       var cleanVr = formatVrNoClean(tx.vrNo);
-      var amt = tx.payment || tx.receipt || 0;
-      var detail = tx.accountName && tx.accountName !== '-' ? tx.accountName + (tx.description ? ' &ndash; ' + tx.description : '') : (tx.description || '-');
+      var amt = Number(tx.payment || tx.debit || tx.amount || tx.receipt || 0);
+      var detail = tx.accountName && tx.accountName !== '-' ? tx.accountName + (tx.description ? ' &ndash; ' + tx.description : '') : (tx.description || tx.particulars || '-');
       html += '<tr>' +
         '<td>' + formatDateHtml(tx.date) + '</td>' +
         '<td style="text-align:center">' + cleanVr + '</td>' +
@@ -14212,8 +17569,8 @@ function printOffering() {
 function getCharityHTML() {
   const searchVal = (document.getElementById('charitySearchInput') ? document.getElementById('charitySearchInput').value : '').toLowerCase().trim();
 
-  const list = currentGeneralTxList.filter(tx => {
-    if (tx.type !== 'Charity') return false;
+  const charityPool = getCharityTransactionsPool();
+  const list = charityPool.filter(tx => {
     const sub = (tx.subtype || '').toLowerCase();
     const mode = selectedCharityMode.toLowerCase();
     const matchesMode = mode === 'all' ? true : sub.includes(mode);
@@ -14503,19 +17860,33 @@ function getIncomeExpenditureHTML() {
   let sbiFdBal = cf.fd;
   targetBankList.forEach(tx => {
     const type = (tx.type || '').toLowerCase();
-    const desc = (tx.description || '').toLowerCase();
+    const desc = (tx.description || tx.particulars || '').toLowerCase();
     const name = (tx.name || tx.accountName || '').toLowerCase();
     const isOpening = type === 'opening balance' || desc.includes('opening balance') || name.includes('opening balance');
     if (isOpening) return;
 
-    const isReceipt = tx.mode && tx.mode.includes("Receipt");
-    const amt = Number(tx.amount || 0);
-    if (tx.account === 'State Bank of India') {
-      if (isReceipt) sbiCurrentBal += amt;
-      else sbiCurrentBal -= amt;
-    } else if (tx.account === 'SBI Fixed Deposit') {
-      if (isReceipt) sbiFdBal += amt;
+    const isCredit = (typeof isTxReceipt === 'function')
+      ? (isTxReceipt(tx) === 1)
+      : ((Number(tx.credit || tx.receipt || 0) > 0) || (tx.mode && (tx.mode.includes("Receipt") || tx.mode.includes("Credit"))));
+    const amt = Number(tx.amount || tx.credit || tx.receipt || tx.debit || tx.payment || tx.payments || 0);
+    const accLower = (tx.account || tx.accountName || tx.account_name || tx.bankAccount || tx.bank_account || '').toLowerCase();
+    let isFD = false;
+    if (accLower.includes('fixed deposit') || accLower.includes('fd')) {
+      isFD = true;
+    } else if (accLower.includes('state bank') || accLower.includes('current') || accLower.includes('sbi')) {
+      isFD = false;
+    } else {
+      const bSubLower = (tx.bankSubtype || tx.bank_subtype || '').toLowerCase();
+      if (bSubLower.includes('fixed deposit') || bSubLower.includes('fd')) {
+        isFD = true;
+      }
+    }
+    if (isFD) {
+      if (isCredit) sbiFdBal += amt;
       else sbiFdBal -= amt;
+    } else {
+      if (isCredit) sbiCurrentBal += amt;
+      else sbiCurrentBal -= amt;
     }
   });
 
@@ -14710,12 +18081,105 @@ function printAllPDF() {
 
 function getDynamicTabHTML(typeName) {
   const rules = (globalFieldRules && globalFieldRules[typeName]) || { mode: 'Both' };
-  const list = currentGeneralTxList.filter(tx => tx.type === typeName);
-  const sortedList = sortTransactionsAscending(list);
-
-  let totalRcpt = 0, totalPmt = 0;
   const isBoth = (rules.mode === 'Both' || !rules.mode);
 
+  const allCandidates = [
+    ...(currentGeneralTxList || []),
+    ...((typeof allTimeBankBookList !== 'undefined') ? filterListByFY(allTimeBankBookList) : [])
+  ];
+
+  const seenIds = new Set();
+  const dedupedCandidates = [];
+  allCandidates.forEach(tx => {
+    const key = String(tx.vrNo || tx.id || Math.random());
+    if (!seenIds.has(key)) {
+      seenIds.add(key);
+      dedupedCandidates.push(tx);
+    }
+  });
+
+  const list = dedupedCandidates.filter(tx => isTxForDynamicType(tx, typeName));
+  const sortedList = sortTransactionsAscending(list);
+
+  if (isBoth) {
+    const rcptList = sortedList.filter(tx => Number(tx.receipt || 0) > 0 || tx.mode === 'Receipt');
+    const pmtList = sortedList.filter(tx => Number(tx.payment || tx.payments || 0) > 0 || tx.mode === 'Payment');
+
+    const totalRcpt = rcptList.reduce((s, tx) => s + (parseFloat(tx.receipt) || 0), 0);
+    const totalPmt = pmtList.reduce((s, tx) => s + (parseFloat(tx.payments || tx.payment) || 0), 0);
+    const netBal = totalRcpt - totalPmt;
+
+    const headers = [
+      { label: 'Date', w: '14%', align: 'left' },
+      { label: 'Vr No', w: '12%', align: 'center' },
+      { label: 'Name / Account', w: '26%', align: 'left' },
+      { label: 'Description / Subtype', w: '30%', align: 'left' },
+      { label: 'Amount (₹)', w: '18%', align: 'right' }
+    ];
+
+    const mapRows = (items, isRcpt) => items.map(tx => {
+      const sub = (tx.subtype || '').trim();
+      const desc = (tx.description || tx.particulars || '').trim();
+      const subDesc = (!sub) ? (desc || '-') : (sub.toLowerCase() === desc.toLowerCase() ? sub : `${sub} – ${desc}`);
+      const amt = isRcpt ? (parseFloat(tx.receipt) || 0) : (parseFloat(tx.payments || tx.payment) || 0);
+      return [
+        formatDateClean(tx.date),
+        formatVrNoClean(tx.vrNo),
+        tx.accountName || tx.particulars || '-',
+        subDesc,
+        `<span class="${isRcpt ? 'print-rcpt-amt' : 'print-pmt-amt'}">${formatCurrency(amt)}</span>`
+      ];
+    });
+
+    const rcptRows = mapRows(rcptList, true);
+    const pmtRows = mapRows(pmtList, false);
+
+    const titleHtml = getPrintHeaderHTML('📁 ' + typeName.toUpperCase() + ' STATEMENT', currentGlobalFY || '', '');
+    const footHtml = getPrintSignaturesHTML('Computer Generated ' + typeName + ' Statement');
+
+    const renderSectionTable = (title, count, rows, subtotal, color) => `
+      <div style="background: #1e293b; color: #ffffff; padding: 6px 12px; font-weight: 800; font-size: 10pt; margin-top: 14px; margin-bottom: 4px; border-radius: 4px; display: flex; justify-content: space-between; align-items: center;">
+        <span>${title} (${count} ${count === 1 ? 'Entry' : 'Entries'})</span>
+        <span style="color: ${color}; font-weight: 800;">Subtotal: ₹ ${formatCurrency(subtotal)}</span>
+      </div>
+      <table style="width: 100%; border-collapse: collapse; margin-bottom: 12px;">
+        <thead>
+          <tr>${headers.map(h => `<th style="width:${h.w};text-align:${h.align};">${h.label}</th>`).join('')}</tr>
+        </thead>
+        <tbody>
+          ${rows.length > 0 ? rows.map(r => `<tr>${r.map((c, i) => `<td style="text-align:${headers[i].align}">${c}</td>`).join('')}</tr>`).join('') : `<tr><td colspan="5" style="text-align:center;color:#94a3b8;padding:12px;">No entries</td></tr>`}
+        </tbody>
+        <tfoot>
+          <tr class="print-totals-row">
+            <td colspan="4" style="text-align:right;">Subtotal:</td>
+            <td style="text-align:right;">₹ ${formatCurrency(subtotal)}</td>
+          </tr>
+        </tfoot>
+      </table>
+    `;
+
+    return `
+      <table style="width: 100%; border: none !important; margin: 0; padding: 0;">
+        <thead><tr><td style="border: none !important; padding: 0;">${titleHtml}</td></tr></thead>
+        <tbody>
+          <tr>
+            <td style="border: none !important; padding: 0;">
+              ${renderSectionTable('📥 RECEIVED / COLLECTIONS', rcptList.length, rcptRows, totalRcpt, '#34d399')}
+              ${renderSectionTable('📤 PAID / EXPENSES', pmtList.length, pmtRows, totalPmt, '#f87171')}
+              <div style="margin-top: 16px; padding: 12px; background: #0f172a; color: #ffffff; border-radius: 6px; display: flex; justify-content: space-between; font-weight: 800; font-size: 11pt;">
+                <span>NET BALANCE (Collections - Expenses):</span>
+                <span style="color: ${netBal >= 0 ? '#34d399' : '#f87171'};">₹ ${formatCurrency(netBal)}</span>
+              </div>
+            </td>
+          </tr>
+        </tbody>
+        <tfoot><tr><td style="border: none !important; padding: 0;">${footHtml}</td></tr></tfoot>
+      </table>
+    `;
+  }
+
+  // Single mode
+  let totalRcpt = 0, totalPmt = 0;
   const rows = sortedList.map(tx => {
     const rcpt = parseFloat(tx.receipt) || 0;
     const pmt = parseFloat(tx.payments) || parseFloat(tx.payment) || 0;
@@ -14723,62 +18187,29 @@ function getDynamicTabHTML(typeName) {
     totalPmt += pmt;
     const amt = rcpt > 0 ? rcpt : pmt;
 
-    const subDesc = (() => {
-      const sub = (tx.subtype || '').trim();
-      const desc = (tx.description || '').trim();
-      if (!sub) return desc || '-';
-      if (sub.toLowerCase() === desc.toLowerCase()) return sub;
-      return sub ? `${sub} – ${desc}` : desc;
-    })();
+    const sub = (tx.subtype || '').trim();
+    const desc = (tx.description || tx.particulars || '').trim();
+    const subDesc = (!sub) ? (desc || '-') : (sub.toLowerCase() === desc.toLowerCase() ? sub : `${sub} – ${desc}`);
 
-    if (isBoth) {
-      return [
-        formatDateClean(tx.date),
-        formatVrNoClean(tx.vrNo),
-        tx.accountName || '-',
-        subDesc,
-        rcpt > 0 ? '<span class="print-rcpt-amt">' + formatCurrency(rcpt) + '</span>' : '-',
-        pmt > 0 ? '<span class="print-pmt-amt">' + formatCurrency(pmt) + '</span>' : '-'
-      ];
-    } else {
-      return [
-        formatDateClean(tx.date),
-        formatVrNoClean(tx.vrNo),
-        tx.accountName || '-',
-        subDesc,
-        '<span class="' + (rules.mode === 'Payment' ? 'print-pmt-amt' : 'print-rcpt-amt') + '">' + formatCurrency(amt) + '</span>'
-      ];
-    }
+    return [
+      formatDateClean(tx.date),
+      formatVrNoClean(tx.vrNo),
+      tx.accountName || tx.particulars || '-',
+      subDesc,
+      '<span class="' + (rules.mode === 'Payment' ? 'print-pmt-amt' : 'print-rcpt-amt') + '">' + formatCurrency(amt) + '</span>'
+    ];
   });
 
-  let headers = [];
-  let totalsRow = [];
-
-  if (isBoth) {
-    headers = [
-      { label: 'Date', w: '12%', align: 'left' },
-      { label: 'Vr No', w: '10%', align: 'center' },
-      { label: 'Name / Account', w: '22%', align: 'left' },
-      { label: 'Description / Subtype', w: '26%', align: 'left' },
-      { label: 'Receipt (₹)', w: '15%', align: 'right' },
-      { label: 'Payment (₹)', w: '15%', align: 'right' }
-    ];
-    totalsRow = ['', '', '', 'TOTAL',
-      totalRcpt > 0 ? formatCurrency(totalRcpt) : '-',
-      totalPmt > 0 ? formatCurrency(totalPmt) : '-'
-    ];
-  } else {
-    headers = [
-      { label: 'Date', w: '14%', align: 'left' },
-      { label: 'Vr No', w: '12%', align: 'center' },
-      { label: 'Name / Account', w: '26%', align: 'left' },
-      { label: 'Description / Subtype', w: '30%', align: 'left' },
-      { label: 'Amount (₹)', w: '18%', align: 'right' }
-    ];
-    totalsRow = ['', '', '', 'TOTAL',
-      formatCurrency(rules.mode === 'Payment' ? totalPmt : totalRcpt)
-    ];
-  }
+  const headers = [
+    { label: 'Date', w: '14%', align: 'left' },
+    { label: 'Vr No', w: '12%', align: 'center' },
+    { label: 'Name / Account', w: '26%', align: 'left' },
+    { label: 'Description / Subtype', w: '30%', align: 'left' },
+    { label: 'Amount (₹)', w: '18%', align: 'right' }
+  ];
+  const totalsRow = ['', '', '', 'TOTAL',
+    formatCurrency(rules.mode === 'Payment' ? totalPmt : totalRcpt)
+  ];
 
   const titleHtml = getPrintHeaderHTML('📁 ' + typeName + ' STATEMENT', currentGlobalFY || '', '');
   const footHtml = getPrintSignaturesHTML('Computer Generated ' + typeName + ' Statement');
@@ -14870,6 +18301,7 @@ function renderDynamicTabs() {
     if (builtInTypes.includes(type)) return; // Skip built-ins
 
     const rules = globalFieldRules[type] || { mode: 'Both' };
+    if (rules.hasDynamicTab === false) return; // Dedicated tab disabled in settings
     if (!isTabApplicableToCurrentFY(rules)) {
       return; // Skip tabs not applicable to currently active FY
     }
@@ -15024,6 +18456,39 @@ function renderDynamicTabs() {
   }
 }
 
+function renderDynamicRow(tx, isBoth, isTxRcpt) {
+  const cd = formatDateHtml(tx.date);
+  const cv = formatVrNoClean(tx.vrNo);
+  const rcpt = parseFloat(tx.receipt) || 0;
+  const pmt = parseFloat(tx.payments) || parseFloat(tx.payment) || 0;
+  const amt = rcpt > 0 ? rcpt : pmt;
+
+  const subText = (tx.subtype && tx.subtype !== '-' && tx.subtype !== 'General') ? tx.subtype : (tx.category || '-');
+  const descText = tx.description || tx.particulars || '-';
+  const nameText = tx.accountName || tx.particulars || '-';
+
+  return `
+    <tr style="border-bottom: 1px solid #f1f5f9;">
+      <td style="font-weight: 500; color: #334155; white-space: nowrap;">${cd}</td>
+      <td style="font-weight: 700; color: #64748b; text-align: center;">${cv}</td>
+      <td style="font-weight: 600; line-height: 1.3; color: #0f172a;">${nameText}</td>
+      <td style="line-height: 1.3;">${subText}</td>
+      <td style="line-height: 1.3;">${descText}</td>
+      ${isBoth ? `
+        <td class="num-col rcpt-val" style="font-weight: 700; color: #047857; text-align: right;">${rcpt > 0 ? formatCurrency(rcpt) : '-'}</td>
+        <td class="num-col pmt-val" style="font-weight: 700; color: #b91c1c; text-align: right;">${pmt > 0 ? formatCurrency(pmt) : '-'}</td>
+      ` : `
+        <td class="num-col ${isTxRcpt ? 'rcpt-val' : 'pmt-val'}" style="font-weight: 700; color: ${isTxRcpt ? '#047857' : '#b91c1c'}; text-align: right;">${formatCurrency(amt)}</td>
+      `}
+      <td style="text-align: center; white-space: nowrap;" class="editor-only">
+        <button class="btn-action btn-table-action" style="background: #0f172a; color: #ffffff; border: none; border-radius: 6px; padding: 4px 8px;" onclick="openTransactionDetailModal('${cv.replace(/'/g, "\\'")}')" title="View Details">👁️</button>
+        <button class="btn-action btn-table-action" style="background: #2563eb; color: #ffffff; border: none; border-radius: 6px; padding: 4px 8px;" onclick="loadEntryForEdit('${cv.replace(/'/g, "\\'")}')" title="Edit Entry">✏️</button>
+        <button class="btn-action btn-table-action" style="background:${isTxRcpt ? '#059669' : '#dc2626'};color:#fff;border:none;border-radius:6px;padding:4px 8px;" onclick="${isTxRcpt ? 'openReceiptModalByVrNo' : 'openPaymentVoucherModalByVrNo'}('${cv.replace(/'/g, "\\'")}')" title="${isTxRcpt ? 'Print Receipt' : 'Print Voucher'}">&#x1F9FE;</button>
+      </td>
+    </tr>
+  `;
+}
+
 function renderDynamicTabTable(typeName) {
   if (!typeName) return;
   const typeIdStr = typeName.replace(/[^a-zA-Z0-9]/g, '');
@@ -15041,63 +18506,134 @@ function renderDynamicTabTable(typeName) {
   let totalRcpt = 0;
   let totalPmt = 0;
 
-  const list = currentGeneralTxList.filter(tx => {
-    if (tx.type !== typeName) return false;
+  const allCandidates = [
+    ...(currentGeneralTxList || []),
+    ...((typeof allTimeBankBookList !== 'undefined') ? filterListByFY(allTimeBankBookList) : [])
+  ];
+
+  const seenIds = new Set();
+  const dedupedCandidates = [];
+  allCandidates.forEach(tx => {
+    const key = String(tx.vrNo || tx.id || Math.random());
+    if (!seenIds.has(key)) {
+      seenIds.add(key);
+      dedupedCandidates.push(tx);
+    }
+  });
+
+  const list = dedupedCandidates.filter(tx => {
+    if (!isTxForDynamicType(tx, typeName)) return false;
 
     if (selectedSubtype !== 'All') {
-      const txSub = (tx.subtype || '').toLowerCase();
+      const txSub = (tx.subtype || tx.category || '').toLowerCase();
       if (txSub !== selectedSubtype.toLowerCase()) return false;
     }
 
     if (searchVal) {
       const a = (tx.accountName || '').toLowerCase();
-      const d = (tx.description || '').toLowerCase();
+      const d = (tx.description || tx.particulars || '').toLowerCase();
       const v = String(tx.vrNo || '').toLowerCase();
-      const s = (tx.subtype || '').toLowerCase();
+      const s = (tx.subtype || tx.category || '').toLowerCase();
       if (!a.includes(searchVal) && !d.includes(searchVal) && !v.includes(searchVal) && !s.includes(searchVal)) return false;
     }
     return true;
   });
 
   tbody.innerHTML = '';
-  if (list.length > 0) {
-    const sortedList = sortTxDescending(list);
-    sortedList.forEach(tx => {
-      const cd = formatDateHtml(tx.date);
-      const cv = formatVrNoClean(tx.vrNo);
-      const rcpt = parseFloat(tx.receipt) || 0;
-      const pmt = parseFloat(tx.payments) || parseFloat(tx.payment) || 0;
-      totalRcpt += rcpt;
-      totalPmt += pmt;
-      const amt = rcpt > 0 ? rcpt : pmt;
-      const isTxRcpt = rcpt > 0;
 
-      const subText = (tx.subtype && tx.subtype !== '-' && tx.subtype !== 'General') ? tx.subtype : '-';
-      const descText = tx.description || '-';
+  if (isBoth) {
+    const rcptList = sortTxDescending(list.filter(tx => Number(tx.receipt || 0) > 0 || tx.mode === 'Receipt'));
+    const pmtList = sortTxDescending(list.filter(tx => Number(tx.payment || tx.payments || 0) > 0 || tx.mode === 'Payment'));
 
-      tbody.innerHTML += `
-            <tr style="border-bottom: 1px solid #f1f5f9;">
-              <td style="font-weight: 500; color: #334155; white-space: nowrap;">${cd}</td>
-              <td style="font-weight: 700; color: #64748b; text-align: center;">${cv}</td>
-              <td style="font-weight: 600; line-height: 1.3; color: #0f172a;">${tx.accountName || '-'}</td>
-              <td style="line-height: 1.3;">${subText}</td>
-              <td style="line-height: 1.3;">${descText}</td>
-              ${isBoth ? `
-                <td class="num-col rcpt-val" style="font-weight: 700; color: #047857; text-align: right;">${rcpt > 0 ? formatCurrency(rcpt) : '-'}</td>
-                <td class="num-col pmt-val" style="font-weight: 700; color: #b91c1c; text-align: right;">${pmt > 0 ? formatCurrency(pmt) : '-'}</td>
-              ` : `
-                <td class="num-col ${isTxRcpt ? 'rcpt-val' : 'pmt-val'}" style="font-weight: 700; color: ${isTxRcpt ? '#047857' : '#b91c1c'}; text-align: right;">${formatCurrency(amt)}</td>
-              `}
-              <td style="text-align: center; white-space: nowrap;" class="editor-only">
-                <button class="btn-action btn-table-action" style="background: #0f172a; color: #ffffff; border: none; border-radius: 6px; padding: 4px 8px;" onclick="openTransactionDetailModal('${cv.replace(/'/g, "\\'")}')" title="View Details">👁️</button>
-                <button class="btn-action btn-table-action" style="background: #2563eb; color: #ffffff; border: none; border-radius: 6px; padding: 4px 8px;" onclick="loadEntryForEdit('${cv.replace(/'/g, "\\'")}')" title="Edit Entry">✏️</button>
-                <button class="btn-action btn-table-action" style="background:${isTxRcpt ? '#059669' : '#dc2626'};color:#fff;border:none;border-radius:6px;padding:4px 8px;" onclick="${isTxRcpt ? 'openReceiptModalByVrNo' : 'openPaymentVoucherModalByVrNo'}('${cv.replace(/'/g, "\\'")}')" title="${isTxRcpt ? 'Print Receipt' : 'Print Voucher'}">&#x1F9FE;</button>
-              </td>
-            </tr>
-          `;
-    });
+    rcptList.forEach(tx => { totalRcpt += parseFloat(tx.receipt) || 0; });
+    pmtList.forEach(tx => { totalPmt += parseFloat(tx.payments || tx.payment) || 0; });
+
+    let tableHtml = '';
+
+    // 1. RECEIVED / COLLECTIONS SECTION
+    tableHtml += `
+      <tr style="background: linear-gradient(90deg, #ecfdf5 0%, #f0fdf4 100%); border-top: 2px solid #059669; border-bottom: 2px solid #a7f3d0;">
+        <td colspan="8" style="padding: 10px 14px; font-weight: 800; color: #065f46; font-size: 0.92rem; letter-spacing: 0.02em;">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <span>📥 RECEIVED / COLLECTIONS (${rcptList.length} ${rcptList.length === 1 ? 'Entry' : 'Entries'})</span>
+            <span style="font-size: 0.95rem; font-weight: 800; color: #047857;">Subtotal: ₹ ${formatCurrency(totalRcpt)}</span>
+          </div>
+        </td>
+      </tr>
+    `;
+
+    if (rcptList.length > 0) {
+      rcptList.forEach(tx => {
+        tableHtml += renderDynamicRow(tx, true, true);
+      });
+      tableHtml += `
+        <tr style="background: #f8fafc; font-weight: 700; border-bottom: 2px solid #cbd5e1;">
+          <td colspan="5" style="text-align: right; padding: 8px 12px; color: #475569; text-transform: uppercase; font-size: 0.78rem;">Total Collections Received:</td>
+          <td class="num-col" style="font-weight: 800; color: #047857; text-align: right; padding: 8px 6px;">₹ ${formatCurrency(totalRcpt)}</td>
+          <td style="text-align: right; color: #cbd5e1;">-</td>
+          <td class="editor-only"></td>
+        </tr>
+      `;
+    } else {
+      tableHtml += `<tr><td colspan="8" style="text-align: center; color: #94a3b8; padding: 14px; font-style: italic;">No received / collection entries found</td></tr>`;
+    }
+
+    // 2. PAID / EXPENSES SECTION
+    tableHtml += `
+      <tr style="background: linear-gradient(90deg, #fef2f2 0%, #fff1f2 100%); border-top: 2px solid #dc2626; border-bottom: 2px solid #fecaca;">
+        <td colspan="8" style="padding: 10px 14px; font-weight: 800; color: #991b1b; font-size: 0.92rem; letter-spacing: 0.02em;">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <span>📤 PAID / EXPENSES (${pmtList.length} ${pmtList.length === 1 ? 'Entry' : 'Entries'})</span>
+            <span style="font-size: 0.95rem; font-weight: 800; color: #b91c1c;">Subtotal: ₹ ${formatCurrency(totalPmt)}</span>
+          </div>
+        </td>
+      </tr>
+    `;
+
+    if (pmtList.length > 0) {
+      pmtList.forEach(tx => {
+        tableHtml += renderDynamicRow(tx, true, false);
+      });
+      tableHtml += `
+        <tr style="background: #f8fafc; font-weight: 700; border-bottom: 2px solid #cbd5e1;">
+          <td colspan="5" style="text-align: right; padding: 8px 12px; color: #475569; text-transform: uppercase; font-size: 0.78rem;">Total Expenses Paid:</td>
+          <td style="text-align: right; color: #cbd5e1;">-</td>
+          <td class="num-col" style="font-weight: 800; color: #b91c1c; text-align: right; padding: 8px 6px;">₹ ${formatCurrency(totalPmt)}</td>
+          <td class="editor-only"></td>
+        </tr>
+      `;
+    } else {
+      tableHtml += `<tr><td colspan="8" style="text-align: center; color: #94a3b8; padding: 14px; font-style: italic;">No paid / expense entries found</td></tr>`;
+    }
+
+    // 3. NET BALANCE SUMMARY ROW
+    tableHtml += `
+      <tr style="background: #0f172a; color: #ffffff; font-weight: 800;">
+        <td colspan="5" style="text-align: right; padding: 10px 14px; text-transform: uppercase; font-size: 0.82rem; letter-spacing: 0.05em;">Net Balance (Collections - Expenses):</td>
+        <td colspan="2" style="text-align: right; padding: 10px 12px; font-size: 0.95rem; color: ${(totalRcpt - totalPmt) >= 0 ? '#34d399' : '#f87171'};">
+          ₹ ${formatCurrency(totalRcpt - totalPmt)}
+        </td>
+        <td class="editor-only"></td>
+      </tr>
+    `;
+
+    tbody.innerHTML = tableHtml;
   } else {
-    tbody.innerHTML = `<tr><td colspan="${isBoth ? 8 : 7}" style="text-align:center;color:#94a3b8;padding:24px;">No records found for ${typeName}</td></tr>`;
+    // Single mode (Payment only or Receipt only)
+    if (list.length > 0) {
+      const sortedList = sortTxDescending(list);
+      let tableHtml = '';
+      sortedList.forEach(tx => {
+        const rcpt = parseFloat(tx.receipt) || 0;
+        const pmt = parseFloat(tx.payments) || parseFloat(tx.payment) || 0;
+        totalRcpt += rcpt;
+        totalPmt += pmt;
+        tableHtml += renderDynamicRow(tx, false, rcpt > 0);
+      });
+      tbody.innerHTML = tableHtml;
+    } else {
+      tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:#94a3b8;padding:24px;">No records found for ${typeName}</td></tr>`;
+    }
   }
 
   if (isBoth) {
@@ -15699,8 +19235,18 @@ function handleSplitFormSubmit(e) {
       const transactionIdEl = document.getElementById('transactionId');
 
       const combinedDesc = items.map(it => {
-        const d = it.description || it.subtype || it.type || '';
-        return (items.length > 1 && d) ? `${d} (₹${formatCurrencyNoSymbol(it.amount)})` : d;
+        const typeName = (it.type || it.category || '').trim();
+        const subName = (it.subtype || '').trim();
+        const descName = (it.description || it.desc || it.particulars || it.month || '').trim();
+        const amt = Number(it.amount || it.amt || 0);
+        let label = typeName || subName || 'Split Item';
+        if (subName && subName !== typeName && !label.toLowerCase().includes(subName.toLowerCase())) {
+          label += ' - ' + subName;
+        }
+        if (descName && descName !== typeName && descName !== subName && !label.toLowerCase().includes(descName.toLowerCase())) {
+          label += ' (' + descName + ')';
+        }
+        return `${label} (₹${formatCurrencyNoSymbol(amt)})`;
       }).filter(Boolean).join(' + ');
 
       const mainAcc = accountNameEl ? accountNameEl.value.trim() : "";

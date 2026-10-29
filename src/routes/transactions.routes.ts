@@ -6,37 +6,54 @@ import { Transaction } from '../types';
 const router = Router();
 
 // Helper to determine next voucher number
+// Payment: calculate sequential numbers starting from 1 (e.g. 1, 2, ... 162)
+// Receipt: calculate highest sequential number starting from 6701 (e.g. 6701, ... 6976)
 async function getNextVrNumbers() {
-  let allVrNos: string[] = [];
+  let maxReceipt = 6700;
+  let maxPayment = 0;
+
   if (isPostgres()) {
-    const res = await query('SELECT vr_no FROM transactions UNION SELECT vr_no FROM bank_transactions');
-    allVrNos = res.rows.map(r => r.vr_no).filter(Boolean);
+    // Check both cash_book and bank_book for receipts
+    const rRes = await query(`
+      SELECT voucher_no FROM cash_book WHERE receipt > 0
+      UNION ALL
+      SELECT voucher_no FROM bank_book WHERE credit > 0
+    `);
+    rRes.rows.forEach(r => {
+      const base = String(r.voucher_no || '').split('/')[0].replace(/\D/g, '');
+      const n = parseInt(base, 10);
+      if (!isNaN(n) && n >= 6701 && n < 100000 && n > maxReceipt) maxReceipt = n;
+    });
+
+    // Check both cash_book and bank_book for payments
+    const pRes = await query(`
+      SELECT voucher_no FROM cash_book WHERE payment > 0
+      UNION ALL
+      SELECT voucher_no FROM bank_book WHERE debit > 0
+    `);
+    pRes.rows.forEach(r => {
+      const base = String(r.voucher_no || '').split('/')[0].replace(/\D/g, '');
+      const n = parseInt(base, 10);
+      if (!isNaN(n) && n >= 1 && n < 6000 && n > maxPayment) maxPayment = n;
+    });
   } else {
-    allVrNos = [
-      ...memoryStore.transactions.map(t => t.vr_no),
-      ...memoryStore.bank_transactions.map(t => t.vr_no)
-    ].filter(Boolean);
-  }
-
-  let maxReceipt = 1000;
-  let maxPayment = 1000;
-
-  for (const vr of allVrNos) {
-    const clean = vr.replace(/\/B$/, '').trim();
-    if (clean.startsWith('R-') || clean.startsWith('R')) {
-      const num = parseInt(clean.replace(/^R-?/, ''), 10);
-      if (!isNaN(num) && num > maxReceipt) maxReceipt = num;
-    } else if (clean.startsWith('P-') || clean.startsWith('P')) {
-      const num = parseInt(clean.replace(/^P-?/, ''), 10);
-      if (!isNaN(num) && num > maxPayment) maxPayment = num;
+    for (const t of memoryStore.transactions) {
+      const n = parseInt(String(t.vr_no || t.vrNo || '').replace(/\D/g, ''), 10);
+      if (!isNaN(n)) {
+        if (Number(t.payment || 0) > 0 && n >= 1 && n < 6000 && n > maxPayment) maxPayment = n;
+        if (Number(t.receipt || 0) > 0 && n >= 6701 && n < 100000 && n > maxReceipt) maxReceipt = n;
+      }
     }
   }
 
+  const nextR = maxReceipt >= 6701 ? maxReceipt + 1 : 6701;
+  const nextP = maxPayment >= 1 ? maxPayment + 1 : 1;
+
   return {
-    nextReceipt: `R-${maxReceipt + 1}`,
-    nextPayment: `P-${maxPayment + 1}`,
-    nextBankReceipt: `R-${maxReceipt + 1}/B`,
-    nextBankPayment: `P-${maxPayment + 1}/B`
+    nextReceipt: String(nextR),
+    nextPayment: String(nextP),
+    nextBankReceipt: `${nextR}/B`,
+    nextBankPayment: `${nextP}/B`
   };
 }
 
@@ -196,14 +213,14 @@ router.post('/', authenticateToken, requireRole(['Admin', 'Treasurer']), async (
         INSERT INTO transactions (
           vr_no, date, mode, entry_type, account_name, address, member_code,
           type, subtype, sub_month, bank_account, bank_subtype, amount,
-          receipt_amount, payment_amount, description, is_cheque, cheque_no, created_by
+          receipt_amount, payment_amount, description, is_cheque, cheque_no
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
         RETURNING *
       `, [
         finalVrNo, date, mode, entry_type, account_name, address, member_code,
         type, subtype, sub_month, bank_account, bank_subtype, numAmount,
-        receiptAmount, paymentAmount, description, is_cheque, cheque_no, req.user?.name || 'System'
+        receiptAmount, paymentAmount, description, is_cheque, cheque_no
       ]);
       insertedTx = result.rows[0];
 
@@ -213,6 +230,11 @@ router.post('/', authenticateToken, requireRole(['Admin', 'Treasurer']), async (
         if (isContraDeposit) bankMode = 'Credit (Receipt)';
         if (isContraWithdrawal) bankMode = 'Debit (Payment)';
 
+        const isContra = isContraDeposit || isContraWithdrawal;
+        const bankVrNo = isContra
+          ? (req.body.contra_vr_no || req.body.contraVrNo || req.body.bank_vr_no || req.body.bankVrNo || (finalVrNo.endsWith('/B') ? finalVrNo : `${finalVrNo}/B`))
+          : finalVrNo;
+
         const bRes = await query(`
           INSERT INTO bank_transactions (
             cash_id, vr_no, date, mode, account, amount, description, subtype, cheque_no
@@ -220,7 +242,7 @@ router.post('/', authenticateToken, requireRole(['Admin', 'Treasurer']), async (
           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
           RETURNING id
         `, [
-          insertedTx.id, finalVrNo, date, bankMode, bank_account, numAmount,
+          insertedTx.id, bankVrNo, date, bankMode, bank_account, numAmount,
           description || (isContraDeposit ? 'Cash Deposit to Bank' : isContraWithdrawal ? 'Cash Withdrawal from Bank' : ''),
           bank_subtype || subtype, cheque_no
         ]);
@@ -228,6 +250,7 @@ router.post('/', authenticateToken, requireRole(['Admin', 'Treasurer']), async (
           const bankId = bRes.rows[0].id;
           await query('UPDATE cash_book SET bank_id = $1 WHERE id = $2', [bankId, insertedTx.id]);
           insertedTx.bank_id = bankId;
+          insertedTx.contra_vr_no = bankVrNo;
         }
       }
 
@@ -370,16 +393,18 @@ router.put('/:id', authenticateToken, requireRole(['Admin', 'Treasurer']), async
       }
 
       // Update linked bank transaction if exists
+      const editContraVr = req.body.contra_vr_no || req.body.contraVrNo || req.body.bank_vr_no || req.body.bankVrNo || null;
       await query(`
         UPDATE bank_book SET
           date = COALESCE($1, date),
-          credit = CASE WHEN particulars ILIKE '%Deposit%' OR category ILIKE '%Deposit%' THEN $2 ELSE 0 END,
+          credit = CASE WHEN particulars ILIKE '%Deposit%' OR category ILIKE '%Deposit%' THEN $2 ELSE credit END,
           debit = CASE WHEN particulars ILIKE '%Withdrawal%' OR category ILIKE '%Withdrawal%' THEN $2 ELSE debit END,
           bank_account = COALESCE($3, bank_account),
           particulars = COALESCE($4, particulars),
-          cheque_no = COALESCE($5, cheque_no)
+          cheque_no = COALESCE($5, cheque_no),
+          voucher_no = COALESCE($7, voucher_no)
         WHERE cash_id = $6 OR id = (SELECT bank_id FROM cash_book WHERE id = $6)
-      `, [date, numAmount, bank_account, description, cheque_no, id]);
+      `, [date, numAmount, bank_account, description, cheque_no, id, editContraVr]);
 
       return res.json({ success: true, transaction: result.rows[0] });
     }

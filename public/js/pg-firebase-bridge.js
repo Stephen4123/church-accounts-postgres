@@ -10,8 +10,16 @@
   const customBackend = window.CHURCH_BACKEND_URL || localStorage.getItem('church_backend_url');
   const defaultRenderBackend = 'https://church-accounts-portal.onrender.com';
   
-  // If running directly on Render or locally, use relative path (''); otherwise route all requests to Render backend
-  const API_BASE = customBackend || ((isLocalhost || isRenderBackend) ? '' : defaultRenderBackend);
+  let API_BASE = customBackend || '';
+  if (!API_BASE) {
+    if (isLocalhost) {
+      API_BASE = (window.location.port === '5000' || !window.location.port) ? '' : `http://${window.location.hostname}:5000`;
+    } else if (isRenderBackend) {
+      API_BASE = '';
+    } else {
+      API_BASE = defaultRenderBackend;
+    }
+  }
   window.CHURCH_API_BASE = API_BASE;
   console.log('[PG Bridge] Backend API Base:', API_BASE || '(relative /api)');
 
@@ -34,6 +42,7 @@
     opening_balances: {},
     users: [],
     suspense_transactions: [],
+    categories: [],
     settings: {
       subtypes: {
         "Ledger": [
@@ -110,7 +119,10 @@
   }
 
   // Fetch all initial data from PostgreSQL
-  async function loadAllFromPostgres() {
+  async function loadAllFromPostgres(force = false) {
+    if (force) {
+      initialLoadPromise = null;
+    }
     if (initialLoadPromise) return initialLoadPromise;
 
     initialLoadPromise = (async () => {
@@ -128,8 +140,26 @@
           if (data.users) store.users = data.users;
           if (data.settings) store.settings = { ...store.settings, ...data.settings };
           if (data.suspense_transactions) store.suspense_transactions = data.suspense_transactions;
+          if (data.categories) {
+            store.categories = data.categories;
+            window.PG_CATEGORIES = data.categories;
+            if (typeof window.applyDatabaseCategories === 'function') {
+              window.applyDatabaseCategories(data.categories);
+            }
+          }
+          if (data.nextReceipt) window.PG_NEXT_RECEIPT = Number(data.nextReceipt);
+          if (data.nextPayment) window.PG_NEXT_PAYMENT = Number(data.nextPayment);
           isInitialLoaded = true;
-          console.log(`[PG Bridge] Loaded ${store.transactions.length} txs, ${store.members.length} members from PostgreSQL.`);
+          console.log(`[PG Bridge] Loaded ${store.transactions.length} txs, ${store.members.length} members, ${store.categories.length} categories from PostgreSQL.`);
+
+          // Notify all active collection subscribers that fresh data has arrived
+          notifyCollection('transactions');
+          notifyCollection('bank_transactions');
+          notifyCollection('members');
+          notifyCollection('opening_balances');
+          notifyCollection('suspense_transactions');
+          notifyCollection('users');
+          notifyCollection('categories');
         }
       } catch (err) {
         console.warn('[PG Bridge] Sync fetch fallback:', err.message);
@@ -138,6 +168,10 @@
 
     return initialLoadPromise;
   }
+
+  window.refreshDatabase = function(force = true) {
+    return loadAllFromPostgres(force);
+  };
 
   // Notify listeners for a collection
   function notifyCollection(colName) {
@@ -582,6 +616,11 @@
       if (sidebarBtn) sidebarBtn.innerText = icon;
     });
   } catch (e) {}
+
+  window.getDbCategories = function () {
+    return store.categories || [];
+  };
+  window.PG_STORE = store;
 
   // Trigger pre-flight fetch immediately
   loadAllFromPostgres();

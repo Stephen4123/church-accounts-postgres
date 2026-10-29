@@ -48,6 +48,7 @@ export interface MemoryStore {
   members: any[];
   bank_accounts: any[];
   subtypes: any[];
+  categories: any[];
   opening_balances: any[];
   transactions: any[];
   bank_transactions: any[];
@@ -62,6 +63,7 @@ export const memoryStore: MemoryStore = {
   members: [],
   bank_accounts: [],
   subtypes: [],
+  categories: [],
   opening_balances: [],
   transactions: [],
   bank_transactions: [],

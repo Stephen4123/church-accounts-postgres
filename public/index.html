@@ -20,7 +20,7 @@
   <link
     href="https://fonts.googleapis.com/css2?family=Manjari:wght@400;700&family=Noto+Sans+Malayalam:wght@400;600;700;800&display=swap"
     rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=202610161533">
+  <link rel="stylesheet" href="styles.css?v=202610271615">
   <style id="modern-ux-enhancements">
     /* --- Standard Professional Live Portal Animations --- */
     @keyframes fadeInUpStagger {
@@ -564,20 +564,29 @@
     }
 
     /* Dashboard, Entry & Edit Tab Whole Page Scroll */
-    #statementTab,
-    #entryTab,
-    #editTab {
+    .main-workspace {
       overflow-y: auto !important;
       overflow-x: hidden !important;
-      height: 100% !important;
-      max-height: 100% !important;
       -webkit-overflow-scrolling: touch !important;
-      overscroll-behavior-y: contain;
     }
 
-    /* Entry & Edit: inner container must NOT restrict height */
+    #statementTab,
+    #entryTab,
+    #editTab,
+    #settingsTab,
+    #memberStatementTab,
+    #subscriptionsTab {
+      height: auto !important;
+      min-height: fit-content !important;
+      max-height: none !important;
+      overflow-y: visible !important;
+      overflow-x: hidden !important;
+    }
+
+    /* Entry & Edit: inner container must naturally expand */
     #entryTab .cashbook-container,
-    #editTab .cashbook-container {
+    #editTab .cashbook-container,
+    #statementTab .cashbook-container {
       height: auto !important;
       min-height: fit-content !important;
       max-height: none !important;
@@ -585,43 +594,35 @@
       flex: 0 0 auto !important;
     }
 
-    /* Dashboard (statementTab) keeps its own internal flex layout */
-    #statementTab .cashbook-container {
-      height: auto !important;
-      min-height: 100% !important;
-      overflow: visible !important;
-    }
-
-    /* Hide visual scrollbars completely */
-    #statementTab::-webkit-scrollbar,
-    .main-workspace::-webkit-scrollbar,
-    .cashbook-container::-webkit-scrollbar,
-    .sheet-table-wrapper::-webkit-scrollbar,
-    ::-webkit-scrollbar {
-      display: none !important;
-      width: 0 !important;
-      height: 0 !important;
-    }
-
-    #statementTab,
-    .main-workspace,
-    .cashbook-container,
-    .sheet-table-wrapper,
-    * {
-      scrollbar-width: none !important;
-      -ms-overflow-style: none !important;
-    }
-
-    #statementTab .cashbook-container {
-      height: auto !important;
-      min-height: 100% !important;
-      overflow: visible !important;
-    }
-
     #statementTab .cb-table-card {
       height: auto !important;
       min-height: fit-content !important;
       overflow: visible !important;
+    }
+
+    /* Modern subtle, draggable scrollbars */
+    ::-webkit-scrollbar {
+      width: 7px !important;
+      height: 7px !important;
+      display: block !important;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: transparent !important;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: rgba(148, 163, 184, 0.45) !important;
+      border-radius: 6px !important;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+      background: rgba(100, 116, 139, 0.75) !important;
+    }
+
+    * {
+      scrollbar-width: thin !important;
+      scrollbar-color: rgba(148, 163, 184, 0.45) transparent !important;
     }
 
     #statementTab .sheet-table-wrapper {
@@ -1380,16 +1381,19 @@
             <div class="cb-top-header-row"
               style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 8px;">
               <div>
-                <div class="cb-header-subtitle" id="dashboardFySubtitle">EXECUTIVE SUMMARY & STATEMENT</div>
+                <div class="cb-header-subtitle" id="dashboardFySubtitle" style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                  <span>EXECUTIVE SUMMARY & STATEMENT</span>
+                  <span class="dash-drill-hint-badge" style="font-size: 0.72rem; font-weight: 600; color: #2563eb; background: #eff6ff; border: 1px solid #bfdbfe; padding: 1px 8px; border-radius: 12px; text-transform: none; letter-spacing: normal;">💡 Click any item to view breakdown ↗</span>
+                </div>
                 <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 2px;">
                   <h1 class="cb-header-title" style="margin: 0; line-height: 1.2;">IPC HOREB CHURCH, THADIYOOR</h1>
                   <div id="activeFyHeaderBadge"
                     style="display: inline-flex; align-items: center; gap: 6px; background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%); color: #ffffff; padding: 4px 12px; border-radius: 20px; font-size: 0.8rem; font-weight: 700; box-shadow: 0 2px 6px rgba(37, 99, 235, 0.25);">
                     <span>📅</span>
-                    <span id="activeFyHeaderText">Financial Year 2025-2026</span>
+                    <span id="activeFyHeaderText">Financial Year 2026-2027</span>
                     <span id="activeFyHeaderDateRange"
-                      style="opacity: 0.85; font-size: 0.72rem; font-weight: 500; margin-left: 4px; border-left: 1px solid rgba(255,255,255,0.3); padding-left: 6px;">01-Apr-2025
-                      to 31-Mar-2026</span>
+                      style="opacity: 0.85; font-size: 0.72rem; font-weight: 500; margin-left: 4px; border-left: 1px solid rgba(255,255,255,0.3); padding-left: 6px;">01-Apr-2026
+                      to 31-Mar-2027</span>
                   </div>
                   <div class="live-sync-chip" title="Realtime Firestore Live Cloud Sync Active">
                     <span class="live-radar-dot"></span>
@@ -1419,7 +1423,7 @@
                     style="position: absolute; top: -2px; right: -4px; background: #ef4444; color: var(--text-white); font-size: 0.65rem; font-weight: 800; padding: 2px 5px; border-radius: 10px; border: 2px solid white; line-height: 1;">0</span>
                 </button>
 
-                <div
+                <div class="top-fy-pill"
                   style="display: flex; align-items: center; gap: 6px; font-size: 0.82rem; font-weight: 600; color: #334155; background: #ffffff; border: 1.5px solid #cbd5e1; border-radius: 8px; padding: 4px 10px; box-shadow: 0 1px 2px rgba(0,0,0,0.05);">
                   <span style="font-weight: 700; color: #2563eb; white-space: nowrap;">🗓️ FY:</span>
                   <select id="globalFySelect" onchange="applyGlobalFyFilter()"
@@ -1427,8 +1431,8 @@
                     <option value="All">All Time</option>
                     <option value="2023-2024">FY 2023-2024</option>
                     <option value="2024-2025">FY 2024-2025</option>
-                    <option value="2025-2026" selected>FY 2025-2026 (Current)</option>
-                    <option value="2026-2027">FY 2026-2027</option>
+                    <option value="2025-2026">FY 2025-2026</option>
+                    <option value="2026-2027" selected>FY 2026-2027 (Current)</option>
                     <option value="2027-2028">FY 2027-2028</option>
                   </select>
                 </div>
@@ -1513,26 +1517,46 @@
               </div>
 
               <!-- Balances Table (Expense Side) -->
-              <div style="border-top: 2px solid var(--border-slate-300); background: var(--bg-slate-50);">
+              <div class="dash-balances-container" style="border-top: 2px solid var(--border-slate-300); background: var(--bg-slate-50);">
                 <table class="cashbook-sheet-table" style="width: 100%; border-collapse: collapse;">
                   <tbody>
-                    <tr>
-                      <td style="padding: 10px 12px; font-weight: 600; width: 65%;">State Bank Current Account</td>
+                    <tr class="dashboard-clickable-row" onclick="drilldownFromDashboard('State Bank of India Current', 'balance')" title="Click to inspect State Bank of India Current in Bank Book ↗" style="cursor: pointer;">
+                      <td style="padding: 10px 12px; font-weight: 600; width: 65%;">
+                        <span style="display: inline-flex; align-items: center; justify-content: space-between; width: 100%;">
+                          <span>State Bank of India Current</span>
+                          <span class="dash-row-drill-icon" style="font-size: 0.72rem; opacity: 0.45; transition: all 0.2s ease; margin-left: 6px;">↗</span>
+                        </span>
+                      </td>
                       <td style="padding: 10px 12px; text-align: right; font-weight: 700; width: 35%; color: #047857;"
                         id="dashSbiCurrent">0.00</td>
                     </tr>
-                    <tr>
-                      <td style="padding: 10px 12px; font-weight: 600;">State Bank Fixed Deposit</td>
+                    <tr class="dashboard-clickable-row" onclick="drilldownFromDashboard('State Bank Fixed Deposit', 'balance')" title="Click to inspect SBI Fixed Deposit in Bank Book ↗" style="cursor: pointer;">
+                      <td style="padding: 10px 12px; font-weight: 600;">
+                        <span style="display: inline-flex; align-items: center; justify-content: space-between; width: 100%;">
+                          <span>State Bank Fixed Deposit</span>
+                          <span class="dash-row-drill-icon" style="font-size: 0.72rem; opacity: 0.45; transition: all 0.2s ease; margin-left: 6px;">↗</span>
+                        </span>
+                      </td>
                       <td style="padding: 10px 12px; text-align: right; font-weight: 700; color: #047857;"
                         id="dashSbiFd">0.00</td>
                     </tr>
-                    <tr>
-                      <td style="padding: 10px 12px; font-weight: 600;">Cash Balance (In Hand)</td>
+                    <tr class="dashboard-clickable-row" onclick="drilldownFromDashboard('Cash Balance (In Hand)', 'balance')" title="Click to inspect Cash in Hand in Cash Book ↗" style="cursor: pointer;">
+                      <td style="padding: 10px 12px; font-weight: 600;">
+                        <span style="display: inline-flex; align-items: center; justify-content: space-between; width: 100%;">
+                          <span>Cash Balance (In Hand)</span>
+                          <span class="dash-row-drill-icon" style="font-size: 0.72rem; opacity: 0.45; transition: all 0.2s ease; margin-left: 6px;">↗</span>
+                        </span>
+                      </td>
                       <td style="padding: 10px 12px; text-align: right; font-weight: 700; color: #047857;"
                         id="dashCashInHand">0.00</td>
                     </tr>
-                    <tr style="background: #e0e7ff; border-top: 2px solid #93c5fd;">
-                      <td style="padding: 12px 12px; font-weight: 800; color: #1e40af;">CLOSING BALANCE</td>
+                    <tr class="dashboard-clickable-row dash-closing-balance-row" onclick="drilldownFromDashboard('CLOSING BALANCE', 'balance')" title="Click to inspect all balances in Bank Book ↗" style="background: #e0e7ff; border-top: 2px solid #93c5fd; cursor: pointer;">
+                      <td style="padding: 12px 12px; font-weight: 800; color: #1e40af;">
+                        <span style="display: inline-flex; align-items: center; justify-content: space-between; width: 100%;">
+                          <span>CLOSING BALANCE</span>
+                          <span class="dash-row-drill-icon" style="font-size: 0.72rem; opacity: 0.55; transition: all 0.2s ease; margin-left: 6px;">↗</span>
+                        </span>
+                      </td>
                       <td style="padding: 12px 12px; text-align: right; font-weight: 800; color: #1e40af;"
                         id="dashBankReserves">0.00</td>
                     </tr>
@@ -1564,7 +1588,7 @@
 
               <div class="cb-top-actions-wrapper"
                 style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
-                <div
+                <div class="entry-balance-pill"
                   style="background: #eff6ff; border: 1px solid #bfdbfe; padding: 6px 14px; border-radius: 8px; text-align: right; box-shadow: 0 2px 4px rgba(37,99,235,0.05);">
                   <span
                     style="font-size: 0.65rem; color: #1e3a8a; font-weight: 700; text-transform: uppercase; display: block; letter-spacing: 0.5px; opacity: 0.8;">GENERAL
@@ -1662,6 +1686,20 @@
                         <span id="bankVrSuffix"
                           style="display: none; position: absolute; right: 14px; top: 12px; font-weight: 700; color: #94a3b8; font-size: 0.95rem;">/B</span>
                       </div>
+                    </div>
+
+                    <!-- Paired Bank/Cash Contra Voucher/Receipt Number -->
+                    <div class="form-group" id="contraNumbersContainer" style="display: none;">
+                      <label id="contraBankVrLabel" for="contraBankVrNo" style="font-weight: 700; color: #1e40af; font-size: 0.88rem; display: flex; align-items: center; justify-content: space-between;">
+                        <span id="contraBankVrLabelText">🧾 Bank Receipt No</span>
+                        <span style="font-size: 0.72rem; background: #dbeafe; color: #1e40af; padding: 2px 6px; border-radius: 4px; font-weight: 700;">Contra Counterpart</span>
+                      </label>
+                      <div class="input-with-icon" style="position: relative; width: 100%;">
+                        <span class="icon">🏦</span>
+                        <input type="text" id="contraBankVrNo" name="contraBankVrNo" placeholder="e.g. 6750/B" autocomplete="off"
+                          style="width: 100%; font-weight: 700; color: #1e3a8a; background: #f0fdf4; border: 1.5px solid #86efac;">
+                      </div>
+                      <small style="color: #64748b; font-size: 0.75rem;">Counter-book voucher/receipt number for Contra transfer.</small>
                     </div>
 
                     <div class="form-group" id="transactionIdContainer" style="display: none;">
@@ -1776,12 +1814,12 @@
                         <div class="input-with-icon">
                           <span class="icon">📁</span>
                           <select id="type" name="type" onchange="onTypeChanged()">
-                            <option value="Subscription" selected>Subscription</option>
-                            <option value="Offering">Offering</option>
-                            <option value="Ledger">Ledger</option>
-                            <option value="Charity">Charity</option>
-                            <option value="Other Income">Other Income</option>
-                            <option value="">-- None / General --</option>
+                            <option value="Subscription|" selected>Subscription</option>
+                            <option value="Offering|">Offering</option>
+                            <option value="Ledger|General Expenses">General Expenses</option>
+                            <option value="Charity|Charity Received">Charity Received</option>
+                            <option value="Other Income|Donations">Donations</option>
+                            <option value="|">-- None / General --</option>
                           </select>
                         </div>
                       </div>
@@ -2019,6 +2057,20 @@
                     </div>
                   </div>
 
+                  <!-- Paired Bank/Cash Contra Voucher/Receipt Number (Edit Mode) -->
+                  <div id="edit_contraNumbersContainer" style="display: none; margin-top: 10px;">
+                    <label id="edit_contraBankVrLabel" for="edit_contraBankVrNo"
+                      style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; font-weight: 700; color: #1e40af; font-size: 0.88rem;">
+                      <div><span id="edit_contraBankVrLabelText">🧾 Paired Contra No</span></div>
+                      <span style="font-size: 0.72rem; background: #dbeafe; color: #1e40af; padding: 2px 6px; border-radius: 4px; font-weight: 700;">Contra Counterpart</span>
+                    </label>
+                    <div class="input-with-icon" style="position: relative; width: 100%;">
+                      <span class="icon">🏦</span>
+                      <input type="text" id="edit_contraBankVrNo" name="edit_contraBankVrNo" placeholder="e.g. 6750/B" autocomplete="off"
+                        style="width: 100%; font-weight: 700; color: #1e3a8a; background: #f0fdf4; border: 1.5px solid #86efac; border-radius: 6px; padding: 8px 10px 8px 36px;">
+                    </div>
+                  </div>
+
                   <div id="edit_transactionIdContainer" style="margin-top: 15px;">
                     <label for="edit_transactionId" style="display: block; margin-bottom: 6px;">Transaction ID / UTR
                       <span
@@ -2098,12 +2150,12 @@
                 <div class="form-group" id="edit_typeGroup">
                   <label for="edit_type">🏷️ Type (Category)</label>
                   <select id="edit_type" name="type" onchange="onEditTypeChanged()">
-                    <option value="Subscription" selected>Subscription</option>
-                    <option value="Offering">Offering</option>
-                    <option value="Ledger">Ledger</option>
-                    <option value="Charity">Charity</option>
-                    <option value="Other Income">Other Income</option>
-                    <option value="">-- None / General --</option>
+                    <option value="Subscription|" selected>Subscription</option>
+                    <option value="Offering|">Offering</option>
+                    <option value="Ledger|General Expenses">General Expenses</option>
+                    <option value="Charity|Charity Received">Charity Received</option>
+                    <option value="Other Income|Donations">Donations</option>
+                    <option value="|">-- None / General --</option>
                   </select>
                 </div>
 
@@ -2574,7 +2626,7 @@
                     <th style="width: 10%; padding: 10px 6px;">Date</th>
                     <th style="width: 8%; text-align: center; padding: 10px 2px;">Vr No</th>
                     <th style="width: 32%; padding: 10px 6px;">Description / Particulars</th>
-                    <th style="width: 22%; padding: 10px 6px;">Subtype / Account Head</th>
+                    <th style="width: 22%; padding: 10px 6px;">Category / Account Head</th>
                     <th style="width: 12%; text-align: right; padding: 10px 4px; color: #047857;">Amount</th>
                     <th style="width: 16%; text-align: center; padding: 10px 2px;" class="editor-only">Actions</th>
                   </tr>
@@ -2617,6 +2669,11 @@
                     style="padding: 7px 12px 7px 30px !important; border-radius: 8px; border: 1px solid var(--border-slate-300); font-size: 0.82rem; width: 180px; outline: none; background: var(--bg-white);">
                 </div>
 
+                <button class="btn-action editor-only cb-top-btn" onclick="cleanDuplicateMembersInFirestore(false)"
+                  style="background: #ffffff; color: #dc2626; border: 1px solid #fca5a5; border-radius: 8px; padding: 7px 12px; font-weight: 700; font-size: 0.82rem; display: flex; align-items: center; gap: 4px; white-space: nowrap;"
+                  title="Check and clean duplicate member records in Firestore">
+                  🧹 Fix Duplicates
+                </button>
                 <button class="btn-action editor-only cb-top-btn" onclick="openAddMemberModal()"
                   style="background: #0f172a; color: var(--text-white); border: none; border-radius: 8px; padding: 7px 14px; font-weight: 700; font-size: 0.82rem; display: flex; align-items: center; gap: 6px; box-shadow: 0 2px 4px rgba(15, 23, 42, 0.15); white-space: nowrap;">
                   ⊕ Add Member
@@ -2680,6 +2737,11 @@
 
               <div class="cb-top-actions-wrapper"
                 style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                <button class="btn-action editor-only cb-top-btn" onclick="cleanDuplicateMembersInFirestore(false)"
+                  style="background: #ffffff; color: #dc2626; border: 1px solid #fca5a5; border-radius: 8px; padding: 7px 12px; font-weight: 700; font-size: 0.82rem; display: flex; align-items: center; gap: 4px; white-space: nowrap;"
+                  title="Check and clean duplicate member records in Firestore">
+                  🧹 Fix Duplicates
+                </button>
                 <button class="btn-action cb-top-btn" onclick="processAndRenderAll()"
                   style="background: var(--bg-white); color: var(--text-slate-700); border: 1px solid var(--border-slate-300); border-radius: 8px; padding: 7px 10px; font-weight: 600; font-size: 0.82rem;"
                   title="Refresh Members">
@@ -3253,101 +3315,251 @@
       <!-- PAGE TAB 9: SETTINGS -->
       <div id="settingsTab" class="page-tab">
         <div class="sheet-card"
-          style="padding: 30px; display: flex; flex-direction: column; overflow-y: auto; height: 100%;">
+          style="padding: 24px 30px; display: flex; flex-direction: column; overflow-y: auto; height: 100%; box-sizing: border-box;">
+          
+          <!-- Header Bar -->
           <div
-            style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid var(--border-slate-200); padding-bottom: 16px; margin-bottom: 24px; flex-wrap: wrap; gap: 16px;">
-            <h2
-              style="font-size: 1.5rem; color: var(--text-slate-900); margin: 0; display: flex; align-items: center; gap: 8px;">
-              ⚙️
-              Application Settings</h2>
+            style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid var(--border-slate-200); padding-bottom: 16px; margin-bottom: 20px; flex-wrap: wrap; gap: 16px;">
+            <div>
+              <h2
+                style="font-size: 1.5rem; color: var(--text-slate-900); margin: 0; display: flex; align-items: center; gap: 10px; font-weight: 800;">
+                <span style="font-size: 1.6rem;">⚙️</span> Application Settings
+              </h2>
+              <p style="font-size: 0.85rem; color: var(--text-slate-500); margin: 4px 0 0 0;">
+                Configure categories, dynamic navigation tabs, bank accounts, UPI payments, and automated cloud backups.
+              </p>
+            </div>
             <button onclick="saveAllSettings()" id="btnSaveSettings"
-              style="background: #059669; color: var(--text-white); border: none; padding: 10px 20px; border-radius: 8px; font-weight: 700; cursor: pointer; transition: background 0.2s;">Save
-              Settings</button>
+              style="background: #059669; color: var(--text-white); border: none; padding: 10px 22px; border-radius: 8px; font-weight: 700; font-size: 0.95rem; cursor: pointer; transition: all 0.2s; display: flex; align-items: center; gap: 8px; box-shadow: 0 2px 4px rgba(5,150,105,0.2);">
+              <span>💾</span> Save All Settings
+            </button>
           </div>
 
-          <div
-            style="display: flex; gap: 16px; margin-bottom: 24px; border-bottom: 2px solid var(--border-slate-200); padding-bottom: 0;">
+          <!-- Modern Tab Navigation Bar -->
+          <div id="settingsNavTabs"
+            style="display: flex; gap: 8px; margin-bottom: 24px; border-bottom: 2px solid var(--border-slate-200); padding-bottom: 0; overflow-x: auto;">
+            <button id="btnSubTabCategories" onclick="switchSettingsSubTab('categories')"
+              style="background: none; border: none; border-bottom: 3px solid #2563eb; padding: 10px 16px; font-weight: 700; color: #1e293b; cursor: pointer; font-size: 0.95rem; transition: color 0.2s; display: flex; align-items: center; gap: 6px; white-space: nowrap;">
+              🏷️ Categories & Dynamic Tabs
+            </button>
+            <button id="btnSubTabBanks" onclick="switchSettingsSubTab('banks')"
+              style="background: none; border: none; border-bottom: 3px solid transparent; padding: 10px 16px; font-weight: 600; color: #64748b; cursor: pointer; font-size: 0.95rem; transition: color 0.2s; display: flex; align-items: center; gap: 6px; white-space: nowrap;">
+              🏦 Bank Accounts
+            </button>
             <button id="btnSubTabGeneral" onclick="switchSettingsSubTab('general')"
-              style="background: none; border: none; border-bottom: 3px solid #2563eb; padding: 10px 16px; font-weight: 700; color: var(--text-slate-800); cursor: pointer; font-size: 1.05rem; transition: color 0.2s;">General
-              Settings</button>
+              style="background: none; border: none; border-bottom: 3px solid transparent; padding: 10px 16px; font-weight: 600; color: #64748b; cursor: pointer; font-size: 0.95rem; transition: color 0.2s; display: flex; align-items: center; gap: 6px; white-space: nowrap;">
+              📱 Payments & Audio
+            </button>
+            <button id="btnSubTabBackup" onclick="switchSettingsSubTab('backup')"
+              style="background: none; border: none; border-bottom: 3px solid transparent; padding: 10px 16px; font-weight: 600; color: #64748b; cursor: pointer; font-size: 0.95rem; transition: color 0.2s; display: flex; align-items: center; gap: 6px; white-space: nowrap;">
+              📧 Backup & Sync
+            </button>
+            <button id="btnSubTabSidebar" onclick="switchSettingsSubTab('sidebar')"
+              style="background: none; border: none; border-bottom: 3px solid transparent; padding: 10px 16px; font-weight: 600; color: #64748b; cursor: pointer; font-size: 0.95rem; transition: color 0.2s; display: flex; align-items: center; gap: 6px; white-space: nowrap;">
+              📑 Sidebar Tabs
+            </button>
             <button id="btnSubTabUsers" onclick="switchSettingsSubTab('users')"
-              style="background: none; border: none; border-bottom: 3px solid transparent; padding: 10px 16px; font-weight: 600; color: var(--text-slate-500); cursor: pointer; font-size: 1.05rem; transition: color 0.2s; display: none;">User
-              Management</button>
+              style="background: none; border: none; border-bottom: 3px solid transparent; padding: 10px 16px; font-weight: 600; color: #64748b; cursor: pointer; font-size: 0.95rem; transition: color 0.2s; display: none; align-items: center; gap: 6px; white-space: nowrap;">
+              👥 User Management
+            </button>
           </div>
 
-          <div id="settingsGeneralSubTab" class="settings-grid">
-            <!-- Left Column: Settings -->
-            <div style="display: flex; flex-direction: column; gap: 24px; min-height: 300px;">
-              <!-- Voice Announcement & Audio Feedback Settings -->
-              <div
-                style="background: var(--bg-slate-50); padding: 20px; border-radius: 12px; border: 1px solid var(--border-slate-300); display: flex; flex-direction: column;">
-                <div
-                  style="display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px;">
-                  <div>
-                    <h3
-                      style="font-size: 1.1rem; font-weight: 700; color: var(--text-slate-800); margin: 0 0 4px 0; display: flex; align-items: center; gap: 8px;">
-                      🔊 Voice Announcements & Audio Feedback
-                    </h3>
-                    <span style="font-size: 0.78rem; color: var(--text-slate-500);">വോയ്സ് അനൗൺസ്മെന്റുകളും സൗണ്ട്
-                      ഫീഡ്‌ബാക്കും (Silent Mode Toggle)</span>
-                  </div>
-                  <label class="switch"
-                    style="position: relative; display: inline-block; width: 44px; height: 24px; flex-shrink: 0;"
-                    title="Enable/Disable Audio Announcements">
-                    <input type="checkbox" id="settingsVoiceToggle" checked onchange="toggleChurchAudio(this.checked)">
-                    <span class="slider round"></span>
-                  </label>
+          <!-- TAB 1: CATEGORIES & DYNAMIC TABS -->
+          <div id="settingsCategoriesSubTab" style="display: flex; flex-direction: column; gap: 24px;">
+            <!-- Top Section: Add New Category Form -->
+            <div
+              style="background: linear-gradient(135deg, #f8fafc 0%, #eff6ff 100%); padding: 22px; border-radius: 12px; border: 1.5px solid #bfdbfe; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);">
+              <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; flex-wrap: wrap; gap: 10px;">
+                <div>
+                  <h3 style="font-size: 1.15rem; font-weight: 800; color: #1e3a8a; margin: 0 0 4px 0; display: flex; align-items: center; gap: 8px;">
+                    <span>➕</span> Add New Category & Dynamic Tab
+                  </h3>
+                  <span style="font-size: 0.82rem; color: #475569;">
+                    Adds category to the Entry screen dropdown and creates an optional dedicated dynamic tab with KPIs and ledger report.
+                  </span>
                 </div>
-                <div
-                  style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; background: #ffffff; padding: 12px 14px; border-radius: 8px; border: 1px solid var(--border-slate-200);">
-                  <div>
-                    <div style="font-size: 0.85rem; font-weight: 700; color: var(--text-slate-800);">Current Audio
-                      Status:</div>
-                    <div id="settingsVoiceStatusText"
-                      style="font-size: 0.8rem; font-weight: 600; color: #059669; margin-top: 2px;">Active (Voice &
-                      Chimes Enabled)</div>
-                  </div>
-                  <button type="button"
-                    onclick="if(typeof speakSuccessMessage==='function') speakSuccessMessage({ vrNo: '101', mode: 'Receipt', accountName: 'Test Member', amount: 5000, type: 'Subscription', subMonth: 'September 2026' }, 'added'); else if(typeof playChurchAudio==='function') playChurchAudio('success');"
-                    style="background: #3b82f6; color: white; border: none; padding: 6px 12px; border-radius: 6px; font-weight: 700; font-size: 0.78rem; cursor: pointer; display: flex; align-items: center; gap: 6px;">
-                    ▶️ Test Voice Sample
-                  </button>
+                <span style="font-size: 0.75rem; background: #dbeafe; color: #1e40af; padding: 4px 10px; border-radius: 20px; font-weight: 700;">
+                  ⚡ Real-time Postgres Sync
+                </span>
+              </div>
+
+              <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin-bottom: 14px;">
+                <!-- Category Name -->
+                <div style="display: flex; flex-direction: column; gap: 6px;">
+                  <label for="newTypeName" style="font-size: 0.85rem; font-weight: 700; color: #1e293b;">
+                    Category Name <span style="color: #ef4444;">*</span>
+                  </label>
+                  <input type="text" id="newTypeName" placeholder="e.g. Youth Fellowship, Sunday School, Convention..."
+                    style="padding: 10px 14px; border: 1.5px solid #cbd5e1; border-radius: 8px; outline: none; font-size: 0.92rem; background: #ffffff;">
+                </div>
+
+                <!-- Mode Selection -->
+                <div style="display: flex; flex-direction: column; gap: 6px;">
+                  <label for="newTypeMode" style="font-size: 0.85rem; font-weight: 700; color: #1e293b;">
+                    Transaction Mode <span style="color: #ef4444;">*</span>
+                  </label>
+                  <select id="newTypeMode"
+                    style="padding: 10px 14px; border: 1.5px solid #cbd5e1; border-radius: 8px; outline: none; font-size: 0.92rem; background: #ffffff; font-weight: 600;">
+                    <option value="Both">Receipt & Payment (Both)</option>
+                    <option value="Receipt">Receipt Only (Income / Collections)</option>
+                    <option value="Payment">Payment Only (Expenses / Vouchers)</option>
+                  </select>
+                </div>
+
+                <!-- Group Selection -->
+                <div style="display: flex; flex-direction: column; gap: 6px;">
+                  <label for="newTypeGroup" style="font-size: 0.85rem; font-weight: 700; color: #1e293b;">
+                    Group Classification
+                  </label>
+                  <select id="newTypeGroup" onchange="toggleNewCategoryCustomGroup(this.value)"
+                    style="padding: 10px 14px; border: 1.5px solid #cbd5e1; border-radius: 8px; outline: none; font-size: 0.92rem; background: #ffffff; font-weight: 600;">
+                    <option value="Standalone">Standalone Category</option>
+                    <option value="Ledger">Ledger (General Expenses)</option>
+                    <option value="Other Income">Other Income</option>
+                    <option value="Monthly Meeting">Monthly Meeting</option>
+                    <option value="Charity">Charity</option>
+                    <option value="Subscription">Subscription</option>
+                    <option value="Offering">Offering</option>
+                    <option value="Contra">Contra Transfer</option>
+                    <option value="Custom">Custom Group Name...</option>
+                  </select>
+                </div>
+
+                <!-- Custom Group Name Input (Hidden by default) -->
+                <div id="newTypeCustomGroupWrapper" style="display: none; flex-direction: column; gap: 6px;">
+                  <label for="newTypeCustomGroup" style="font-size: 0.85rem; font-weight: 700; color: #1e293b;">
+                    Custom Group Name
+                  </label>
+                  <input type="text" id="newTypeCustomGroup" placeholder="Enter custom group..."
+                    style="padding: 10px 14px; border: 1.5px solid #cbd5e1; border-radius: 8px; outline: none; font-size: 0.92rem; background: #ffffff;">
                 </div>
               </div>
 
-              <!-- UPI Settings -->
+              <!-- Options & Toggles Bar -->
+              <div
+                style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 14px; background: #ffffff; padding: 12px 16px; border-radius: 8px; border: 1px solid #e2e8f0; margin-bottom: 14px;">
+                <div style="display: flex; align-items: center; gap: 18px; flex-wrap: wrap;">
+                  <!-- Dynamic Tab Toggle Checkbox -->
+                  <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 0.88rem; font-weight: 700; color: #1e40af;">
+                    <input type="checkbox" id="newTypeDynamicTabToggle" checked
+                      style="width: 18px; height: 18px; cursor: pointer; accent-color: #2563eb;">
+                    <span>📂 Create Dynamic Tab (Show in navigation & workspace)</span>
+                  </label>
+
+                  <!-- FY Scope Selection -->
+                  <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 0.85rem; font-weight: 600; color: #475569;">
+                    <input type="checkbox" id="newTypeAllFY" checked onchange="toggleNewTypeFySelect(this.checked)"
+                      style="cursor: pointer; width: 16px; height: 16px; accent-color: #2563eb;">
+                    <span>🌐 All Financial Years</span>
+                  </label>
+
+                  <div id="newTypeFyWrapper" style="display: none; align-items: center; gap: 6px;">
+                    <span style="font-size: 0.82rem; font-weight: 700; color: #1e293b;">Target FY:</span>
+                    <select id="newTypeFY"
+                      style="padding: 4px 8px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.82rem; font-weight: 600; background: #f8fafc;">
+                    </select>
+                  </div>
+                </div>
+
+                <!-- Add Button -->
+                <button type="button" onclick="addNewCategoryFromSettings()"
+                  style="background: #2563eb; color: #ffffff; border: none; padding: 10px 20px; border-radius: 8px; font-weight: 700; font-size: 0.92rem; cursor: pointer; transition: background 0.2s; display: flex; align-items: center; gap: 6px; white-space: nowrap; box-shadow: 0 2px 4px rgba(37,99,235,0.25);">
+                  ➕ Add Category & Setup Tab
+                </button>
+              </div>
+            </div>
+
+            <!-- Bottom Section: Managed Categories Registry -->
+            <div
+              style="background: var(--bg-slate-50); padding: 20px; border-radius: 12px; border: 1px solid var(--border-slate-300); display: flex; flex-direction: column;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 12px;">
+                <div>
+                  <h3 style="font-size: 1.1rem; font-weight: 800; color: var(--text-slate-800); margin: 0 0 4px 0; display: flex; align-items: center; gap: 8px;">
+                    <span>📋</span> Categories & Dynamic Tabs Registry
+                  </h3>
+                  <span style="font-size: 0.8rem; color: var(--text-slate-500);">
+                    All active transaction types. Toggle "Dynamic Tab" ON or OFF for any category at any time.
+                  </span>
+                </div>
+                <!-- Search Filter -->
+                <div style="position: relative; min-width: 240px;">
+                  <input type="text" id="settingsCategorySearch" oninput="filterSettingsCategories(this.value)" placeholder="Search category name..."
+                    style="width: 100%; padding: 8px 12px 8px 34px; border: 1px solid var(--border-slate-300); border-radius: 8px; outline: none; font-size: 0.88rem; background: #ffffff; box-sizing: border-box;">
+                  <span style="position: absolute; left: 10px; top: 9px; font-size: 0.85rem; color: #94a3b8;">🔍</span>
+                </div>
+              </div>
+
+              <!-- List of Categories rendered by JS -->
+              <div id="settingsTypesList"
+                style="display: flex; flex-direction: column; gap: 12px; overflow-y: auto; padding-right: 4px; max-height: 600px;">
+                <div style="color: var(--text-slate-500); font-size: 0.9rem; text-align: center; padding: 20px;">
+                  Loading categories & dynamic tabs...
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- TAB 2: BANK ACCOUNTS -->
+          <div id="settingsBanksSubTab" style="display: none; flex-direction: column; gap: 20px;">
+            <div
+              style="background: var(--bg-slate-50); padding: 20px; border-radius: 12px; border: 1px solid var(--border-slate-300); display: flex; flex-direction: column;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; flex-wrap: wrap; gap: 10px;">
+                <div>
+                  <h3 style="font-size: 1.15rem; font-weight: 700; color: var(--text-slate-800); margin: 0 0 4px 0; display: flex; align-items: center; gap: 8px;">
+                    🏦 Managed Bank Accounts
+                  </h3>
+                  <span style="font-size: 0.8rem; color: var(--text-slate-500);">Bank accounts used across the Bank Book, Contra transfers, and statements.</span>
+                </div>
+              </div>
+
+              <div style="display: flex; gap: 10px; margin-bottom: 16px; flex-shrink: 0; flex-wrap: wrap; background: #ffffff; padding: 12px; border-radius: 8px; border: 1px solid var(--border-slate-200);">
+                <input type="text" id="newBankName" placeholder="Enter new bank account name (e.g. Federal Bank Current A/c)..."
+                  style="flex: 1; min-width: 200px; padding: 9px 14px; border: 1px solid var(--border-slate-300); border-radius: 6px; outline: none; font-size: 0.92rem;">
+                <button onclick="addBankAccount()"
+                  style="background: #2563eb; color: var(--text-white); border: none; padding: 9px 18px; border-radius: 6px; font-weight: 700; font-size: 0.9rem; cursor: pointer; display: flex; align-items: center; gap: 6px;">
+                  ➕ Add Account
+                </button>
+              </div>
+
+              <div id="settingsBankList"
+                style="display: flex; flex-direction: column; gap: 10px; overflow-y: auto; padding-right: 4px; max-height: 500px;">
+                <div style="color: var(--text-slate-500); font-size: 0.9rem; text-align: center; padding: 20px;">
+                  Loading bank accounts...
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- TAB 3: GENERAL & PAYMENTS & VOICE -->
+          <div id="settingsGeneralSubTab" style="display: none; flex-direction: column; gap: 20px;">
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px;">
+              <!-- Digital Payments (UPI) -->
               <div
                 style="background: var(--bg-slate-50); padding: 20px; border-radius: 12px; border: 1px solid var(--border-slate-300); display: flex; flex-direction: column;">
-                <h3 style="font-size: 1.1rem; font-weight: 700; color: var(--text-slate-800); margin: 0 0 16px 0;">📱
-                  Digital Payments
+                <h3 style="font-size: 1.1rem; font-weight: 700; color: var(--text-slate-800); margin: 0 0 16px 0; display: flex; align-items: center; gap: 8px;">
+                  📱 Digital Payments (UPI QR Code)
                 </h3>
                 <div style="display: flex; flex-direction: column; gap: 8px;">
                   <label for="churchUpiId"
-                    style="font-size: 0.85rem; font-weight: 600; color: var(--text-slate-600);">Church UPI ID
-                    (for QR Code)</label>
+                    style="font-size: 0.85rem; font-weight: 600; color: var(--text-slate-600);">Church UPI ID (for QR Code)</label>
                   <input type="text" id="churchUpiId" placeholder="e.g. churchname@sbi"
                     style="padding: 10px 12px; border: 1px solid var(--border-slate-300); border-radius: 6px; outline: none; font-size: 0.95rem;">
-                  <small style="color: var(--text-slate-500); font-size: 0.75rem;">Enter the official UPI ID. A QR code
-                    will be
-                    generated for receipts to allow instant payments.</small>
+                  <small style="color: var(--text-slate-500); font-size: 0.75rem;">Enter the church UPI ID. A QR code is generated on receipts for donors to pay digitally.</small>
                 </div>
               </div>
 
-              <!-- Phone Number Formatting Settings -->
+              <!-- Phone Prefix -->
               <div
                 style="background: var(--bg-slate-50); padding: 20px; border-radius: 12px; border: 1px solid var(--border-slate-300); display: flex; flex-direction: column;">
-                <h3 style="font-size: 1.1rem; font-weight: 700; color: var(--text-slate-800); margin: 0 0 16px 0;">📞
-                  Phone Number
-                  Formatting</h3>
+                <h3 style="font-size: 1.1rem; font-weight: 700; color: var(--text-slate-800); margin: 0 0 16px 0; display: flex; align-items: center; gap: 8px;">
+                  📞 Phone Number Formatting
+                </h3>
                 <div style="display: flex; flex-direction: column; gap: 14px;">
                   <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px;">
                     <div>
                       <label for="phonePrefixToggle"
-                        style="font-size: 0.9rem; font-weight: 700; color: var(--text-slate-800); display: block; cursor: pointer;">Auto-Prefix
-                        Country Code (+91)</label>
-                      <span style="font-size: 0.78rem; color: var(--text-slate-500);">Automatically prepend +91 for
-                        10-digit mobile
-                        numbers in phone fields.</span>
+                        style="font-size: 0.9rem; font-weight: 700; color: var(--text-slate-800); display: block; cursor: pointer;">Auto-Prefix Country Code (+91)</label>
+                      <span style="font-size: 0.78rem; color: var(--text-slate-500);">Automatically prepend +91 for 10-digit mobile numbers.</span>
                     </div>
                     <label class="switch"
                       style="position: relative; display: inline-block; width: 44px; height: 24px; flex-shrink: 0;">
@@ -3359,8 +3571,7 @@
                   <div id="phonePrefixCodeWrapper"
                     style="display: flex; align-items: center; gap: 10px; border-top: 1px solid var(--border-slate-200); padding-top: 10px;">
                     <label for="phonePrefixCode"
-                      style="font-size: 0.82rem; font-weight: 600; color: var(--text-slate-600);">Default
-                      Country Code Prefix:</label>
+                      style="font-size: 0.82rem; font-weight: 600; color: var(--text-slate-600);">Default Country Code Prefix:</label>
                     <input type="text" id="phonePrefixCode" value="+91" placeholder="+91"
                       style="width: 85px; padding: 6px 10px; border: 1px solid var(--border-slate-300); border-radius: 6px; outline: none; font-weight: 700; font-size: 0.88rem; color: var(--text-slate-900);"
                       onchange="if(typeof globalPhonePrefixCode !== 'undefined') globalPhonePrefixCode = this.value.trim() || '+91'">
@@ -3368,278 +3579,239 @@
                 </div>
               </div>
 
-              <!-- Automated Excel Email Backup Settings -->
+              <!-- Audio & Voice Feedback -->
               <div
-                style="background: var(--bg-slate-50); padding: 20px; border-radius: 12px; border: 1px solid var(--border-slate-300); display: flex; flex-direction: column; gap: 16px;">
+                style="background: var(--bg-slate-50); padding: 20px; border-radius: 12px; border: 1px solid var(--border-slate-300); display: flex; flex-direction: column; grid-column: 1 / -1;">
                 <div
-                  style="display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--border-slate-200); padding-bottom: 12px;">
+                  style="display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px;">
                   <div>
                     <h3
                       style="font-size: 1.1rem; font-weight: 700; color: var(--text-slate-800); margin: 0 0 4px 0; display: flex; align-items: center; gap: 8px;">
-                      📧 Automated Excel Email Backup
+                      🔊 Voice Announcements & Audio Feedback
                     </h3>
-                    <span style="font-size: 0.78rem; color: var(--text-slate-500);">ആട്ടോമാറ്റിക് എക്സൽ ഇമെയിൽ ബാക്കപ്പ്
-                      ക്രമീകരണങ്ങൾ</span>
+                    <span style="font-size: 0.78rem; color: var(--text-slate-500);">വോയ്സ് അനൗൺസ്മെന്റുകളും സൗണ്ട് ഫീഡ്‌ബാക്കും (Audio confirmation on voucher entry)</span>
                   </div>
                   <label class="switch"
                     style="position: relative; display: inline-block; width: 44px; height: 24px; flex-shrink: 0;"
-                    title="Enable/Disable Scheduled Backup">
-                    <input type="checkbox" id="autoBackupToggle" onchange="toggleAutoBackupUI(this.checked)">
+                    title="Enable/Disable Audio Announcements">
+                    <input type="checkbox" id="settingsVoiceToggle" checked onchange="toggleChurchAudio(this.checked)">
                     <span class="slider round"></span>
                   </label>
                 </div>
-
-                <div id="autoBackupDetailsWrapper" style="display: flex; flex-direction: column; gap: 14px;">
-                  <!-- Recipient Email Address -->
-                  <div style="display: flex; flex-direction: column; gap: 6px;">
-                    <label for="autoBackupEmail"
-                      style="font-size: 0.85rem; font-weight: 600; color: var(--text-slate-600);">
-                      Recipient Email Address(es) <span style="color:#ef4444;">*</span>
-                    </label>
-                    <input type="email" id="autoBackupEmail"
-                      placeholder="e.g. churchadmin@example.com, treasurer@example.com"
-                      style="padding: 10px 12px; border: 1px solid var(--border-slate-300); border-radius: 6px; outline: none; font-size: 0.9rem;"
-                      onchange="if(typeof globalAutoBackupConfig !== 'undefined') globalAutoBackupConfig.email = this.value.trim()">
-                    <small style="color: var(--text-slate-500); font-size: 0.75rem;">Enter email address(es) where the
-                      automated Excel
-                      backup should be sent. Separate multiple with commas.</small>
-                  </div>
-
-                  <!-- Frequency Selection -->
-                  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
-                    <div style="display: flex; flex-direction: column; gap: 6px;">
-                      <label for="autoBackupFrequency"
-                        style="font-size: 0.85rem; font-weight: 600; color: var(--text-slate-600);">
-                        Schedule Frequency (ക്രമം)
-                      </label>
-                      <select id="autoBackupFrequency" onchange="handleBackupFreqChange(this.value)"
-                        style="padding: 9px 12px; border: 1px solid var(--border-slate-300); border-radius: 6px; outline: none; font-size: 0.9rem; background: var(--bg-white); font-weight: 600;">
-                        <option value="weekly">Weekly (എല്ലാ ആഴ്ചയിലും)</option>
-                        <option value="daily">Daily (എല്ലാ ദിവസവും)</option>
-                        <option value="custom">Custom Interval (വ്യക്തിഗത ഇടവേള)</option>
-                      </select>
-                    </div>
-
-                    <!-- Weekly Day Picker -->
-                    <div id="autoBackupDayOfWeekWrapper" style="display: flex; flex-direction: column; gap: 6px;">
-                      <label for="autoBackupDayOfWeek"
-                        style="font-size: 0.85rem; font-weight: 600; color: var(--text-slate-600);">
-                        Backup Day (ഏത് ദിവസം)
-                      </label>
-                      <select id="autoBackupDayOfWeek"
-                        style="padding: 9px 12px; border: 1px solid var(--border-slate-300); border-radius: 6px; outline: none; font-size: 0.9rem; background: var(--bg-white); font-weight: 600;">
-                        <option value="1">Monday (തിങ്കൾ)</option>
-                        <option value="2">Tuesday (ചൊവ്വ)</option>
-                        <option value="3">Wednesday (ബുധൻ)</option>
-                        <option value="4">Thursday (വ്യാഴം)</option>
-                        <option value="5">Friday (വെള്ളി)</option>
-                        <option value="6">Saturday (ശനി)</option>
-                        <option value="0">Sunday (ഞായർ)</option>
-                      </select>
-                    </div>
-
-                    <!-- Time of Day (for Daily & Weekly) -->
-                    <div id="autoBackupTimeWrapper" style="display: flex; flex-direction: column; gap: 6px;">
-                      <label for="autoBackupTime"
-                        style="font-size: 0.85rem; font-weight: 600; color: var(--text-slate-600);">
-                        Execution Time (സമയം)
-                      </label>
-                      <input type="time" id="autoBackupTime" value="09:00"
-                        style="padding: 8px 12px; border: 1px solid var(--border-slate-300); border-radius: 6px; outline: none; font-size: 0.9rem;">
-                    </div>
-
-                    <!-- Custom Interval Options (if Custom is chosen) -->
-                    <div id="autoBackupCustomWrapper"
-                      style="display: none; grid-column: 1 / -1; gap: 12px; grid-template-columns: 1fr 1fr;">
-                      <div style="display: flex; flex-direction: column; gap: 6px;">
-                        <label for="autoBackupIntervalVal"
-                          style="font-size: 0.85rem; font-weight: 600; color: var(--text-slate-600);">
-                          Interval Value (എത്ര ഇടവിട്ട്)
-                        </label>
-                        <input type="number" id="autoBackupIntervalVal" min="1" value="7"
-                          style="padding: 9px 12px; border: 1px solid var(--border-slate-300); border-radius: 6px; outline: none; font-size: 0.9rem;">
-                      </div>
-                      <div style="display: flex; flex-direction: column; gap: 6px;">
-                        <label for="autoBackupIntervalUnit"
-                          style="font-size: 0.85rem; font-weight: 600; color: var(--text-slate-600);">
-                          Interval Unit (യൂണിറ്റ്)
-                        </label>
-                        <select id="autoBackupIntervalUnit"
-                          style="padding: 9px 12px; border: 1px solid var(--border-slate-300); border-radius: 6px; outline: none; font-size: 0.9rem; background: var(--bg-white); font-weight: 600;">
-                          <option value="days">Days (ദിവസങ്ങൾ)</option>
-                          <option value="minutes">Minutes (മിനിറ്റുകൾ)</option>
-                        </select>
-                      </div>
-                    </div>
-                  </div>
-
-                  <!-- Advanced API Integration Toggle (Optional EmailJS / Webhook endpoint) -->
-                  <details
-                    style="background: var(--bg-white); border: 1px solid var(--border-slate-200); border-radius: 8px; padding: 10px 14px;">
-                    <summary
-                      style="font-size: 0.82rem; font-weight: 700; color: #2563eb; cursor: pointer; user-select: none;">
-                      ⚙️ Advanced Email API / Webhook Settings (Optional)
-                    </summary>
-                    <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 10px;">
-                      <small style="color: var(--text-slate-500); font-size: 0.75rem;">
-                        Provide your Webhook URL or EmailJS keys for direct serverless automated email delivery with
-                        Excel attachments.
-                      </small>
-                      <div style="display: flex; flex-direction: column; gap: 4px;">
-                        <label for="autoBackupWebhookUrl"
-                          style="font-size: 0.78rem; font-weight: 600; color: var(--text-slate-600);">Custom Webhook /
-                          Email Endpoint
-                          URL:</label>
-                        <input type="url" id="autoBackupWebhookUrl" placeholder="https://api.example.com/send-backup"
-                          style="padding: 6px 10px; border: 1px solid var(--border-slate-300); border-radius: 6px; font-size: 0.82rem;">
-                      </div>
-                      <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px;">
-                        <div>
-                          <label for="emailjsServiceId"
-                            style="font-size: 0.75rem; font-weight: 600; color: var(--text-slate-600);">EmailJS Service
-                            ID:</label>
-                          <input type="text" id="emailjsServiceId" placeholder="service_xxx"
-                            style="padding: 6px 8px; border: 1px solid var(--border-slate-300); border-radius: 6px; font-size: 0.8rem; width: 100%; box-sizing: border-box;">
-                        </div>
-                        <div>
-                          <label for="emailjsTemplateId"
-                            style="font-size: 0.75rem; font-weight: 600; color: var(--text-slate-600);">EmailJS Template
-                            ID:</label>
-                          <input type="text" id="emailjsTemplateId" placeholder="template_xxx"
-                            style="padding: 6px 8px; border: 1px solid var(--border-slate-300); border-radius: 6px; font-size: 0.8rem; width: 100%; box-sizing: border-box;">
-                        </div>
-                        <div>
-                          <label for="emailjsPublicKey"
-                            style="font-size: 0.75rem; font-weight: 600; color: var(--text-slate-600);">EmailJS Public
-                            Key:</label>
-                          <input type="text" id="emailjsPublicKey" placeholder="user_xxx"
-                            style="padding: 6px 8px; border: 1px solid var(--border-slate-300); border-radius: 6px; font-size: 0.8rem; width: 100%; box-sizing: border-box;">
-                        </div>
-                      </div>
-                    </div>
-                  </details>
-
-                  <!-- Status & Action Bar -->
-                  <div
-                    style="background: var(--bg-white); border: 1px dashed var(--border-slate-300); border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 10px;">
-                    <div
-                      style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px;">
-                      <span style="font-size: 0.82rem; font-weight: 700; color: var(--text-slate-600);">Last Backup
-                        Status:</span>
-                      <span id="autoBackupLastStatus"
-                        style="font-size: 0.82rem; font-weight: 600; color: var(--text-slate-500);">Not
-                        run yet</span>
-                    </div>
-                    <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                      <button type="button" onclick="triggerImmediateEmailBackup()"
-                        style="background: #2563eb; color: var(--text-white); border: none; padding: 8px 14px; border-radius: 6px; font-weight: 700; font-size: 0.85rem; cursor: pointer; flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px;">
-                        ⚡ Send Email Backup Now
-                      </button>
-                      <button type="button" onclick="exportToExcel()"
-                        style="background: #475569; color: var(--text-white); border: none; padding: 8px 14px; border-radius: 6px; font-weight: 700; font-size: 0.85rem; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px;">
-                        📥 Download Excel
-                      </button>
-                    </div>
-                  </div>
-
-                </div>
-              </div>
-
-              <!-- Bank Accounts -->
-              <div
-                style="background: var(--bg-slate-50); padding: 20px; border-radius: 12px; border: 1px solid var(--border-slate-300); display: flex; flex-direction: column; flex: 1;">
-                <h3 style="font-size: 1.1rem; font-weight: 700; color: var(--text-slate-800); margin: 0 0 16px 0;">🏦
-                  Bank Accounts
-                </h3>
-                <div style="display: flex; gap: 8px; margin-bottom: 16px; flex-shrink: 0; flex-wrap: wrap;">
-                  <input type="text" id="newBankName" placeholder="Enter new bank name..."
-                    style="flex: 1; min-width: 140px; padding: 8px 12px; border: 1px solid var(--border-slate-300); border-radius: 6px; outline: none; font-size: 0.9rem;">
-                  <button onclick="addBankAccount()"
-                    style="background: #2563eb; color: var(--text-white); border: none; padding: 8px 16px; border-radius: 6px; font-weight: 600; cursor: pointer;">Add</button>
-                </div>
-                <div id="settingsBankList"
-                  style="display: flex; flex-direction: column; gap: 8px; overflow-y: auto; padding-right: 4px; flex: 1;">
-                  <div style="color: var(--text-slate-500); font-size: 0.9rem; text-align: center; padding: 20px;">
-                    Loading bank
-                    accounts...</div>
-                </div>
-              </div>
-            </div>
-
-            <!-- Right Column: Types & Visibility Rules -->
-            <div style="display: flex; flex-direction: column; gap: 24px; min-height: 300px;">
-              <div
-                style="background: var(--bg-slate-50); padding: 20px; border-radius: 12px; border: 1px solid var(--border-slate-300); display: flex; flex-direction: column; height: 100%;">
-                <h3 style="font-size: 1.1rem; font-weight: 700; color: var(--text-slate-800); margin: 0 0 16px 0;">🏷️
-                  Transaction
-                  Types</h3>
-
                 <div
-                  style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; background: var(--bg-white); padding: 12px; border-radius: 8px; border: 1px solid var(--border-slate-200);">
-                  <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-                    <input type="text" id="newTypeName"
-                      placeholder="Enter new transaction type (e.g. Monthly Meeting)..."
-                      style="flex: 1; min-width: 160px; padding: 8px 12px; border: 1px solid var(--border-slate-300); border-radius: 6px; outline: none; font-size: 0.88rem;">
-                    <button onclick="addTransactionType()"
-                      style="background: #2563eb; color: var(--text-white); border: none; padding: 8px 16px; border-radius: 6px; font-weight: 600; font-size: 0.88rem; cursor: pointer; white-space: nowrap;">
-                      ➕ Add Type
-                    </button>
+                  style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; background: #ffffff; padding: 12px 14px; border-radius: 8px; border: 1px solid var(--border-slate-200);">
+                  <div>
+                    <div style="font-size: 0.85rem; font-weight: 700; color: var(--text-slate-800);">Current Audio Status:</div>
+                    <div id="settingsVoiceStatusText"
+                      style="font-size: 0.8rem; font-weight: 600; color: #059669; margin-top: 2px;">Active (Voice & Chimes Enabled)</div>
                   </div>
-                  <div
-                    style="display: flex; align-items: center; gap: 14px; flex-wrap: wrap; font-size: 0.82rem; color: var(--text-slate-600); margin-top: 4px;">
-                    <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-weight: 600;">
-                      <input type="checkbox" id="newTypeAllFY" checked onchange="toggleNewTypeFySelect(this.checked)"
-                        style="cursor: pointer; margin: 0;">
-                      🌐 All Financial Years
-                    </label>
-                    <div id="newTypeFyWrapper" style="display: none; align-items: center; gap: 6px;">
-                      <span style="font-weight: 600; color: var(--text-slate-700);">Target FY:</span>
-                      <select id="newTypeFY"
-                        style="padding: 3px 8px; border: 1px solid var(--border-slate-300); border-radius: 4px; outline: none; font-size: 0.8rem; background: var(--bg-slate-50); font-weight: 600;">
-                      </select>
-                    </div>
-                  </div>
-                </div>
-
-                <div id="settingsTypesList"
-                  style="display: flex; flex-direction: column; gap: 12px; overflow-y: auto; padding-right: 4px; flex: 1;">
-                  <div style="color: var(--text-slate-500); font-size: 0.9rem; text-align: center; padding: 20px;">
-                    Loading types...
-                  </div>
+                  <button type="button"
+                    onclick="if(typeof speakSuccessMessage==='function') speakSuccessMessage({ vrNo: '101', mode: 'Receipt', accountName: 'Test Member', amount: 5000, type: 'Subscription', subMonth: 'September 2026' }, 'added'); else if(typeof playChurchAudio==='function') playChurchAudio('success');"
+                    style="background: #3b82f6; color: white; border: none; padding: 6px 12px; border-radius: 6px; font-weight: 700; font-size: 0.78rem; cursor: pointer; display: flex; align-items: center; gap: 6px;">
+                    ▶️ Test Voice Sample
+                  </button>
                 </div>
               </div>
             </div>
-
-            <!-- Third Column: Sidebar Tab Ordering -->
-            <div style="display: flex; flex-direction: column; gap: 24px; min-height: 300px;">
-              <div
-                style="background: var(--bg-slate-50); padding: 20px; border-radius: 12px; border: 1px solid var(--border-slate-300); display: flex; flex-direction: column; height: 100%;">
-                <h3 style="font-size: 1.1rem; font-weight: 700; color: var(--text-slate-800); margin: 0 0 8px 0;">📑
-                  Sidebar Tabs</h3>
-                <p style="font-size: 0.85rem; color: var(--text-slate-500); margin: 0 0 16px 0;">Reorder navigation tabs
-                  using the
-                  up/down arrows.</p>
-                <div id="settingsTabOrderList"
-                  style="display: flex; flex-direction: column; gap: 8px; overflow-y: auto; padding-right: 4px; flex: 1;">
-                  <div style="color: var(--text-slate-500); font-size: 0.9rem; text-align: center; padding: 20px;">
-                    Loading tabs...
-                  </div>
-                </div>
-              </div>
-            </div>
-
           </div>
 
-          <!-- User Management Column (Admins Only) -->
-          <div id="settingsUsersSubTab" style="display: none; flex-direction: column; gap: 24px; max-width: 800px;">
+          <!-- TAB 4: AUTOMATED BACKUP & EXCEL -->
+          <div id="settingsBackupSubTab" style="display: none; flex-direction: column; gap: 20px;">
             <div
-              style="background: var(--bg-slate-50); padding: 20px; border-radius: 12px; border: 1px solid var(--border-slate-300); display: flex; flex-direction: column;">
+              style="background: var(--bg-slate-50); padding: 22px; border-radius: 12px; border: 1px solid var(--border-slate-300); display: flex; flex-direction: column; gap: 16px;">
+              <div
+                style="display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--border-slate-200); padding-bottom: 12px;">
+                <div>
+                  <h3
+                    style="font-size: 1.15rem; font-weight: 800; color: var(--text-slate-800); margin: 0 0 4px 0; display: flex; align-items: center; gap: 8px;">
+                    📧 Automated Scheduled Excel Email Backup
+                  </h3>
+                  <span style="font-size: 0.8rem; color: var(--text-slate-500);">ആട്ടോമാറ്റിക് എക്സൽ ഇമെയിൽ ബാക്കപ്പ് ക്രമീകരണങ്ങൾ</span>
+                </div>
+                <label class="switch"
+                  style="position: relative; display: inline-block; width: 44px; height: 24px; flex-shrink: 0;"
+                  title="Enable/Disable Scheduled Backup">
+                  <input type="checkbox" id="autoBackupToggle" onchange="toggleAutoBackupUI(this.checked)">
+                  <span class="slider round"></span>
+                </label>
+              </div>
+
+              <div id="autoBackupDetailsWrapper" style="display: flex; flex-direction: column; gap: 14px;">
+                <!-- Recipient Email Address -->
+                <div style="display: flex; flex-direction: column; gap: 6px;">
+                  <label for="autoBackupEmail"
+                    style="font-size: 0.85rem; font-weight: 700; color: var(--text-slate-700);">
+                    Recipient Email Address(es) <span style="color:#ef4444;">*</span>
+                  </label>
+                  <input type="email" id="autoBackupEmail"
+                    placeholder="e.g. churchadmin@example.com, treasurer@example.com"
+                    style="padding: 10px 14px; border: 1px solid var(--border-slate-300); border-radius: 6px; outline: none; font-size: 0.92rem;"
+                    onchange="if(typeof globalAutoBackupConfig !== 'undefined') globalAutoBackupConfig.email = this.value.trim()">
+                  <small style="color: var(--text-slate-500); font-size: 0.75rem;">Enter email address(es) where the automated Excel backup should be sent. Separate multiple with commas.</small>
+                </div>
+
+                <!-- Frequency Selection -->
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px;">
+                  <div style="display: flex; flex-direction: column; gap: 6px;">
+                    <label for="autoBackupFrequency"
+                      style="font-size: 0.85rem; font-weight: 700; color: var(--text-slate-700);">
+                      Schedule Frequency (ക്രമം)
+                    </label>
+                    <select id="autoBackupFrequency" onchange="handleBackupFreqChange(this.value)"
+                      style="padding: 9px 12px; border: 1px solid var(--border-slate-300); border-radius: 6px; outline: none; font-size: 0.9rem; background: var(--bg-white); font-weight: 600;">
+                      <option value="weekly">Weekly (എല്ലാ ആഴ്ചയിലും)</option>
+                      <option value="daily">Daily (എല്ലാ ദിവസവും)</option>
+                      <option value="custom">Custom Interval (വ്യക്തിഗത ഇടവേള)</option>
+                    </select>
+                  </div>
+
+                  <!-- Weekly Day Picker -->
+                  <div id="autoBackupDayOfWeekWrapper" style="display: flex; flex-direction: column; gap: 6px;">
+                    <label for="autoBackupDayOfWeek"
+                      style="font-size: 0.85rem; font-weight: 700; color: var(--text-slate-700);">
+                      Backup Day (ഏത് ദിവസം)
+                    </label>
+                    <select id="autoBackupDayOfWeek"
+                      style="padding: 9px 12px; border: 1px solid var(--border-slate-300); border-radius: 6px; outline: none; font-size: 0.9rem; background: var(--bg-white); font-weight: 600;">
+                      <option value="1">Monday (തിങ്കൾ)</option>
+                      <option value="2">Tuesday (ചൊവ്വ)</option>
+                      <option value="3">Wednesday (ബുധൻ)</option>
+                      <option value="4">Thursday (വ്യാഴം)</option>
+                      <option value="5">Friday (വെള്ളി)</option>
+                      <option value="6">Saturday (ശനി)</option>
+                      <option value="0">Sunday (ഞായർ)</option>
+                    </select>
+                  </div>
+
+                  <!-- Time of Day (for Daily & Weekly) -->
+                  <div id="autoBackupTimeWrapper" style="display: flex; flex-direction: column; gap: 6px;">
+                    <label for="autoBackupTime"
+                      style="font-size: 0.85rem; font-weight: 700; color: var(--text-slate-700);">
+                      Execution Time (സമയം)
+                    </label>
+                    <input type="time" id="autoBackupTime" value="09:00"
+                      style="padding: 8px 12px; border: 1px solid var(--border-slate-300); border-radius: 6px; outline: none; font-size: 0.9rem;">
+                  </div>
+
+                  <!-- Custom Interval Options (if Custom is chosen) -->
+                  <div id="autoBackupCustomWrapper"
+                    style="display: none; grid-column: 1 / -1; gap: 12px; grid-template-columns: 1fr 1fr;">
+                    <div style="display: flex; flex-direction: column; gap: 6px;">
+                      <label for="autoBackupIntervalVal"
+                        style="font-size: 0.85rem; font-weight: 600; color: var(--text-slate-600);">
+                        Interval Value (എത്ര ഇടവിട്ട്)
+                      </label>
+                      <input type="number" id="autoBackupIntervalVal" min="1" value="7"
+                        style="padding: 9px 12px; border: 1px solid var(--border-slate-300); border-radius: 6px; outline: none; font-size: 0.9rem;">
+                    </div>
+                    <div style="display: flex; flex-direction: column; gap: 6px;">
+                      <label for="autoBackupIntervalUnit"
+                        style="font-size: 0.85rem; font-weight: 600; color: var(--text-slate-600);">
+                        Interval Unit (യൂണിറ്റ്)
+                      </label>
+                      <select id="autoBackupIntervalUnit"
+                        style="padding: 9px 12px; border: 1px solid var(--border-slate-300); border-radius: 6px; outline: none; font-size: 0.9rem; background: var(--bg-white); font-weight: 600;">
+                        <option value="days">Days (ദിവസങ്ങൾ)</option>
+                        <option value="minutes">Minutes (മിനിറ്റുകൾ)</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Advanced Webhook / EmailJS details -->
+                <details
+                  style="background: var(--bg-white); border: 1px solid var(--border-slate-200); border-radius: 8px; padding: 10px 14px;">
+                  <summary
+                    style="font-size: 0.82rem; font-weight: 700; color: #2563eb; cursor: pointer; user-select: none;">
+                    ⚙️ Advanced Email API / Webhook Settings (Optional)
+                  </summary>
+                  <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 10px;">
+                    <small style="color: var(--text-slate-500); font-size: 0.75rem;">
+                      Provide your Webhook URL or EmailJS keys for automated email delivery with Excel attachments.
+                    </small>
+                    <div style="display: flex; flex-direction: column; gap: 4px;">
+                      <label for="autoBackupWebhookUrl"
+                        style="font-size: 0.78rem; font-weight: 600; color: var(--text-slate-600);">Custom Webhook / Email Endpoint URL:</label>
+                      <input type="url" id="autoBackupWebhookUrl" placeholder="https://api.example.com/send-backup"
+                        style="padding: 6px 10px; border: 1px solid var(--border-slate-300); border-radius: 6px; font-size: 0.82rem;">
+                    </div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px;">
+                      <div>
+                        <label for="emailjsServiceId"
+                          style="font-size: 0.75rem; font-weight: 600; color: var(--text-slate-600);">EmailJS Service ID:</label>
+                        <input type="text" id="emailjsServiceId" placeholder="service_xxx"
+                          style="padding: 6px 8px; border: 1px solid var(--border-slate-300); border-radius: 6px; font-size: 0.8rem; width: 100%; box-sizing: border-box;">
+                      </div>
+                      <div>
+                        <label for="emailjsTemplateId"
+                          style="font-size: 0.75rem; font-weight: 600; color: var(--text-slate-600);">EmailJS Template ID:</label>
+                        <input type="text" id="emailjsTemplateId" placeholder="template_xxx"
+                          style="padding: 6px 8px; border: 1px solid var(--border-slate-300); border-radius: 6px; font-size: 0.8rem; width: 100%; box-sizing: border-box;">
+                      </div>
+                      <div>
+                        <label for="emailjsPublicKey"
+                          style="font-size: 0.75rem; font-weight: 600; color: var(--text-slate-600);">EmailJS Public Key:</label>
+                        <input type="text" id="emailjsPublicKey" placeholder="user_xxx"
+                          style="padding: 6px 8px; border: 1px solid var(--border-slate-300); border-radius: 6px; font-size: 0.8rem; width: 100%; box-sizing: border-box;">
+                      </div>
+                    </div>
+                  </div>
+                </details>
+
+                <!-- Status & Action Bar -->
+                <div
+                  style="background: var(--bg-white); border: 1px dashed var(--border-slate-300); border-radius: 8px; padding: 14px; display: flex; flex-direction: column; gap: 10px;">
+                  <div
+                    style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px;">
+                    <span style="font-size: 0.85rem; font-weight: 700; color: var(--text-slate-700);">Last Backup Status:</span>
+                    <span id="autoBackupLastStatus"
+                      style="font-size: 0.82rem; font-weight: 600; color: var(--text-slate-500);">Not run yet</span>
+                  </div>
+                  <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                    <button type="button" onclick="triggerImmediateEmailBackup()"
+                      style="background: #2563eb; color: var(--text-white); border: none; padding: 10px 16px; border-radius: 6px; font-weight: 700; font-size: 0.88rem; cursor: pointer; flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px;">
+                      ⚡ Send Email Backup Now
+                    </button>
+                    <button type="button" onclick="exportToExcel()"
+                      style="background: #475569; color: var(--text-white); border: none; padding: 10px 16px; border-radius: 6px; font-weight: 700; font-size: 0.88rem; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px;">
+                      📥 Download Excel
+                    </button>
+                  </div>
+                </div>
+
+              </div>
+            </div>
+          </div>
+
+          <!-- TAB 5: SIDEBAR TAB ORDER -->
+          <div id="settingsSidebarSubTab" style="display: none; flex-direction: column; gap: 20px;">
+            <div
+              style="background: var(--bg-slate-50); padding: 22px; border-radius: 12px; border: 1px solid var(--border-slate-300); display: flex; flex-direction: column;">
+              <h3 style="font-size: 1.15rem; font-weight: 700; color: var(--text-slate-800); margin: 0 0 6px 0; display: flex; align-items: center; gap: 8px;">
+                📑 Navigation Sidebar Tab Ordering
+              </h3>
+              <p style="font-size: 0.85rem; color: var(--text-slate-500); margin: 0 0 16px 0;">Reorder navigation tabs using the up/down arrows to prioritize your workflow.</p>
+              <div id="settingsTabOrderList"
+                style="display: flex; flex-direction: column; gap: 8px; overflow-y: auto; padding-right: 4px; max-height: 500px;">
+                <div style="color: var(--text-slate-500); font-size: 0.9rem; text-align: center; padding: 20px;">
+                  Loading tabs...
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- TAB 6: USER MANAGEMENT (ADMINS ONLY) -->
+          <div id="settingsUsersSubTab" style="display: none; flex-direction: column; gap: 20px; max-width: 900px;">
+            <div
+              style="background: var(--bg-slate-50); padding: 22px; border-radius: 12px; border: 1px solid var(--border-slate-300); display: flex; flex-direction: column;">
               <div
                 style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 12px;">
-                <h3 style="font-size: 1.1rem; font-weight: 700; color: var(--text-slate-800); margin: 0;">👥 Registered
-                  Users</h3>
+                <div>
+                  <h3 style="font-size: 1.15rem; font-weight: 700; color: var(--text-slate-800); margin: 0 0 4px 0;">👥 Registered Portal Users</h3>
+                  <span style="font-size: 0.8rem; color: var(--text-slate-500);">Manage authorized church portal accounts and permission roles.</span>
+                </div>
                 <button onclick="document.getElementById('addUserModal').style.display='flex'"
-                  style="background: #2563eb; color: var(--text-white); border: none; padding: 8px 16px; border-radius: 6px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 6px;">
+                  style="background: #2563eb; color: var(--text-white); border: none; padding: 8px 16px; border-radius: 6px; font-weight: 700; cursor: pointer; display: flex; align-items: center; gap: 6px;">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
                     stroke-linecap="round" stroke-linejoin="round">
                     <line x1="12" y1="5" x2="12" y2="19"></line>
@@ -3649,10 +3821,10 @@
                 </button>
               </div>
               <div id="usersListContainer"
-                style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; max-height: 500px; overflow-y: auto; padding-right: 4px;">
+                style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; max-height: 500px; overflow-y: auto; padding-right: 4px;">
                 <div
                   style="color: var(--text-slate-500); font-size: 0.9rem; text-align: center; padding: 20px; grid-column: 1 / -1;">
-                  Loading use..</div>
+                  Loading users...</div>
               </div>
             </div>
           </div>
@@ -3760,38 +3932,56 @@
 
   <script>
     function switchSettingsSubTab(tab) {
-      const btnGen = document.getElementById('btnSubTabGeneral');
-      const btnUsers = document.getElementById('btnSubTabUsers');
-      const secGen = document.getElementById('settingsGeneralSubTab');
-      const secUsers = document.getElementById('settingsUsersSubTab');
+      const tabs = ['categories', 'banks', 'general', 'backup', 'sidebar', 'users'];
+      const targetTab = tabs.includes(tab) ? tab : 'categories';
 
-      if (tab === 'general') {
-        if (secGen) secGen.style.display = 'grid';
-        if (secUsers) secUsers.style.display = 'none';
-        if (btnGen) {
-          btnGen.style.borderBottomColor = '#2563eb';
-          btnGen.style.color = '#1e293b';
-          btnGen.style.fontWeight = '700';
+      // Mapping button IDs and content section IDs
+      const tabConfig = {
+        categories: { btn: 'btnSubTabCategories', sec: 'settingsCategoriesSubTab', display: 'flex' },
+        banks: { btn: 'btnSubTabBanks', sec: 'settingsBanksSubTab', display: 'flex' },
+        general: { btn: 'btnSubTabGeneral', sec: 'settingsGeneralSubTab', display: 'flex' },
+        backup: { btn: 'btnSubTabBackup', sec: 'settingsBackupSubTab', display: 'flex' },
+        sidebar: { btn: 'btnSubTabSidebar', sec: 'settingsSidebarSubTab', display: 'flex' },
+        users: { btn: 'btnSubTabUsers', sec: 'settingsUsersSubTab', display: 'flex' }
+      };
+
+      tabs.forEach(t => {
+        const conf = tabConfig[t];
+        const btn = document.getElementById(conf.btn);
+        const sec = document.getElementById(conf.sec);
+
+        if (t === targetTab) {
+          if (sec) sec.style.display = conf.display;
+          if (btn) {
+            btn.style.borderBottomColor = '#2563eb';
+            btn.style.color = '#1e293b';
+            btn.style.fontWeight = '700';
+          }
+        } else {
+          if (sec) sec.style.display = 'none';
+          if (btn) {
+            btn.style.borderBottomColor = 'transparent';
+            btn.style.color = '#64748b';
+            btn.style.fontWeight = '600';
+          }
         }
-        if (btnUsers) {
-          btnUsers.style.borderBottomColor = 'transparent';
-          btnUsers.style.color = '#64748b';
-          btnUsers.style.fontWeight = '600';
-        }
-      } else {
-        if (secGen) secGen.style.display = 'none';
-        if (secUsers) secUsers.style.display = 'flex';
-        if (btnUsers) {
-          btnUsers.style.borderBottomColor = '#2563eb';
-          btnUsers.style.color = '#1e293b';
-          btnUsers.style.fontWeight = '700';
-        }
-        if (btnGen) {
-          btnGen.style.borderBottomColor = 'transparent';
-          btnGen.style.color = '#64748b';
-          btnGen.style.fontWeight = '600';
-        }
+      });
+
+      if (targetTab === 'categories') {
+        if (typeof renderSettingsTypesList === 'function') renderSettingsTypesList();
+      } else if (targetTab === 'banks') {
+        if (typeof renderSettingsBankList === 'function') renderSettingsBankList();
+      } else if (targetTab === 'sidebar') {
+        if (typeof renderSettingsTabOrderList === 'function') renderSettingsTabOrderList();
+      } else if (targetTab === 'users') {
         if (typeof renderAdminUserList === 'function') renderAdminUserList();
+      }
+    }
+
+    function toggleNewCategoryCustomGroup(val) {
+      const wrapper = document.getElementById('newTypeCustomGroupWrapper');
+      if (wrapper) {
+        wrapper.style.display = (val === 'Custom') ? 'flex' : 'none';
       }
     }
   </script>
@@ -3840,9 +4030,9 @@
   </div>
 
   <!-- PostgreSQL Firestore Bridge (Connects 100% to local PostgreSQL Express API) -->
-  <script src="js/pg-firebase-bridge.js?v=202610162153"></script>
+  <script src="js/pg-firebase-bridge.js?v=202610210045"></script>
 
-  <script src="app.js?v=202610162153"></script>
+  <script src="app.js?v=202610271615"></script>
 
   <!-- COMBINED ENTRIES MODAL OVERLAY -->
   <div id="combinedEntriesModal" class="modal-overlay" style="display: none;">
@@ -5492,6 +5682,12 @@
       }
     }
 
+    let settingsCategorySearchFilter = '';
+    function filterSettingsCategories(query) {
+      settingsCategorySearchFilter = (query || '').toLowerCase().trim();
+      renderSettingsTypesList();
+    }
+
     function renderSettingsTypesList() {
       const listEl = document.getElementById('settingsTypesList');
       if (!listEl) return;
@@ -5500,14 +5696,67 @@
       populateNewTypeFyOptions();
 
       const fyList = typeof getAvailableFyList === 'function' ? getAvailableFyList() : [];
+      const dbCats = window.dbCategories || [];
 
-      Object.keys(globalFieldRules).forEach(type => {
+      // Combine types from globalFieldRules and database categories
+      const allTypeKeys = new Set(Object.keys(globalFieldRules));
+      dbCats.forEach(c => {
+        if (c.name && c.name !== '-- None / General --' && c.name !== 'None / General') {
+          // If group_name is empty or same as name or standalone, treat as type
+          if (!c.group_name || c.group_name === c.name || c.group_name === 'Standalone' || !['Ledger', 'Other Income', 'Monthly Meeting', 'Charity', 'Subscription', 'Offering', 'Contra', 'Bank', 'General'].includes(c.group_name)) {
+            allTypeKeys.add(c.name);
+          }
+        }
+      });
+
+      const sortedTypes = Array.from(allTypeKeys).sort((a, b) => {
+        const builtIns = ['Subscription', 'Offering', 'Ledger', 'Charity', 'Other Income', 'Monthly Meeting'];
+        const aIdx = builtIns.indexOf(a);
+        const bIdx = builtIns.indexOf(b);
+        if (aIdx !== -1 && bIdx !== -1) return aIdx - bIdx;
+        if (aIdx !== -1) return -1;
+        if (bIdx !== -1) return 1;
+        return a.localeCompare(b);
+      });
+
+      let renderedCount = 0;
+
+      sortedTypes.forEach(type => {
+        if (!globalFieldRules[type]) {
+          const matchingDbCat = dbCats.find(c => c.name === type);
+          globalFieldRules[type] = {
+            showAccount: true,
+            showAddress: false,
+            showSubtype: false,
+            showMonth: false,
+            mode: matchingDbCat ? (matchingDbCat.type || 'Both') : 'Both',
+            fy: 'All',
+            hasDynamicTab: false
+          };
+        }
+
         const rules = globalFieldRules[type];
         if (!rules.mode) rules.mode = 'Both';
         if (!rules.fy) rules.fy = 'All';
         if (!subTypesConfig[type]) subTypesConfig[type] = [];
 
         const isBuiltIn = ['Subscription', 'Charity', 'Ledger', 'Offering', 'Other Income'].includes(type);
+        const typeIdStr = type.replace(/[^a-zA-Z0-9]/g, '');
+        const tabId = 'dynamicTab_' + typeIdStr;
+        const hasTab = rules.hasDynamicTab !== false && (isBuiltIn || (globalSidebarOrder && globalSidebarOrder.includes(tabId)));
+
+        // Find associated group name
+        const dbCat = dbCats.find(c => c.name === type);
+        const groupName = dbCat && dbCat.group_name && dbCat.group_name !== type ? dbCat.group_name : (isBuiltIn ? 'Core Church Book' : 'Custom Category');
+
+        // Apply search filter if active
+        if (settingsCategorySearchFilter) {
+          const matchName = type.toLowerCase().includes(settingsCategorySearchFilter);
+          const matchGrp = groupName.toLowerCase().includes(settingsCategorySearchFilter);
+          if (!matchName && !matchGrp) return;
+        }
+
+        renderedCount++;
 
         let fySelectHTML = '';
         if (!isBuiltIn) {
@@ -5518,7 +5767,7 @@
           fySelectHTML = `
             <div style="display: flex; align-items: center; gap: 4px;">
               <span style="font-size: 0.75rem; color: var(--text-slate-500); font-weight: 600;">FY:</span>
-              <select onchange="updateTypeFY('${type}', this.value)" title="Assign Financial Year Scope" style="padding: 3px 6px; font-size: 0.78rem; border: 1px solid var(--border-slate-300); border-radius: 6px; outline: none; font-weight: 600; background: ${rules.fy === 'All' ? '#f0fdf4' : '#eff6ff'}; color: ${rules.fy === 'All' ? '#166534' : '#1e40af'}; cursor: pointer;">
+              <select onchange="updateTypeFY('${type.replace(/'/g, "\\'")}', this.value)" title="Assign Financial Year Scope" style="padding: 3px 6px; font-size: 0.78rem; border: 1px solid var(--border-slate-300); border-radius: 6px; outline: none; font-weight: 600; background: ${rules.fy === 'All' ? '#f0fdf4' : '#eff6ff'}; color: ${rules.fy === 'All' ? '#166534' : '#1e40af'}; cursor: pointer;">
                 ${opts}
               </select>
             </div>
@@ -5532,79 +5781,148 @@
         let subtypesHTML = '';
         if (rules.showSubtype) {
           subtypesHTML = `
-            <div style="margin-top: 12px; padding: 12px; background: var(--bg-slate-100); border-radius: 6px; border: 1px dashed var(--border-slate-300);">
+            <div style="margin-top: 12px; padding: 12px; background: var(--bg-slate-100); border-radius: 8px; border: 1px dashed var(--border-slate-300);">
               <h4 style="font-size: 0.85rem; color: var(--text-slate-600); margin: 0 0 10px 0; text-transform: uppercase; font-weight: 700;">Subtypes for ${type}</h4>
               <div style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px;">
                 ${subTypesConfig[type].map((st, i) => {
             const stName = typeof st === 'string' ? st : st.name;
             const stMode = typeof st === 'string' ? 'Both' : (st.mode || 'Both');
             return `
-                  <div style="display: flex; justify-content: space-between; align-items: center; background: var(--bg-white); padding: 6px 10px; border-radius: 4px; border: 1px solid var(--border-slate-200); font-size: 0.85rem;">
+                  <div style="display: flex; justify-content: space-between; align-items: center; background: var(--bg-white); padding: 6px 10px; border-radius: 6px; border: 1px solid var(--border-slate-200); font-size: 0.85rem;">
                     <span style="font-weight: 600; color: var(--text-slate-800);">${stName}</span>
                     <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
-                      <select onchange="updateSubtypeMode('${type}', ${i}, this.value)" style="padding: 2px 4px; font-size: 0.75rem; border: 1px solid var(--border-slate-300); border-radius: 4px; outline: none;">
+                      <select onchange="updateSubtypeMode('${type.replace(/'/g, "\\'")}', ${i}, this.value)" style="padding: 2px 4px; font-size: 0.75rem; border: 1px solid var(--border-slate-300); border-radius: 4px; outline: none;">
                         <option value="Both" ${stMode === 'Both' ? 'selected' : ''}>Receipt & Payment</option>
                         <option value="Receipt" ${stMode === 'Receipt' ? 'selected' : ''}>Receipt Only</option>
                         <option value="Payment" ${stMode === 'Payment' ? 'selected' : ''}>Payment Only</option>
                       </select>
-                      <button onclick="deleteSubtype('${type}', ${i})" style="background: none; border: none; color: #ef4444; cursor: pointer; font-size: 0.9rem;" title="Delete Subtype">🗑️</button>
+                      <button onclick="deleteSubtype('${type.replace(/'/g, "\\'")}', ${i})" style="background: none; border: none; color: #ef4444; cursor: pointer; font-size: 0.9rem;" title="Delete Subtype">🗑️</button>
                     </div>
                   </div>
                 `}).join('')}
               </div>
               <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-                <input type="text" id="newSubtype_${type.replace(/\s+/g, '_')}" placeholder="Add subtype..." style="flex: 1; min-width: 100px; padding: 6px 10px; border: 1px solid var(--border-slate-300); border-radius: 4px; outline: none; font-size: 0.85rem;">
-                <button onclick="addSubtype('${type}')" style="background: #2563eb; color: var(--text-white); border: none; padding: 6px 12px; border-radius: 4px; font-weight: 600; font-size: 0.85rem; cursor: pointer;">Add</button>
+                <input type="text" id="newSubtype_${type.replace(/\s+/g, '_')}" placeholder="Add subtype..." style="flex: 1; min-width: 100px; padding: 6px 10px; border: 1px solid var(--border-slate-300); border-radius: 6px; outline: none; font-size: 0.85rem;">
+                <button onclick="addSubtype('${type.replace(/'/g, "\\'")}')" style="background: #2563eb; color: var(--text-white); border: none; padding: 6px 12px; border-radius: 6px; font-weight: 600; font-size: 0.85rem; cursor: pointer;">Add</button>
               </div>
             </div>
           `;
         }
 
+        // Dynamic Tab switch HTML (Only configurable for non-built-in categories)
+        let dynamicTabSwitchHTML = '';
+        if (!isBuiltIn) {
+          dynamicTabSwitchHTML = `
+            <div style="display: flex; align-items: center; gap: 8px; background: ${hasTab ? '#eff6ff' : '#f8fafc'}; padding: 4px 10px; border-radius: 20px; border: 1px solid ${hasTab ? '#bfdbfe' : '#e2e8f0'};" title="Toggle dedicated Dynamic Tab in Navigation">
+              <label class="switch" style="position: relative; display: inline-block; width: 36px; height: 20px; margin: 0;">
+                <input type="checkbox" ${hasTab ? 'checked' : ''} onchange="toggleCategoryDynamicTab('${type.replace(/'/g, "\\'")}', this.checked)" style="margin: 0;">
+                <span class="slider round" style="border-radius: 20px;"></span>
+              </label>
+              <span style="font-size: 0.76rem; font-weight: 700; color: ${hasTab ? '#1e40af' : '#64748b'};">
+                ${hasTab ? '📂 Tab ON' : '📋 Dropdown'}
+              </span>
+            </div>
+          `;
+        } else {
+          dynamicTabSwitchHTML = `
+            <span style="font-size: 0.72rem; font-weight: 700; color: #1e40af; background: #dbeafe; padding: 3px 8px; border-radius: 12px;">🏛️ System Tab</span>
+          `;
+        }
+
         listEl.innerHTML += `
-          <div style="display: flex; flex-direction: column; background: var(--bg-white); padding: 10px 14px; border-radius: 8px; border: 1px solid var(--border-slate-300);">
+          <div style="display: flex; flex-direction: column; background: var(--bg-white); padding: 12px 16px; border-radius: 10px; border: 1px solid #e2e8f0; box-shadow: 0 1px 3px rgba(0,0,0,0.03);">
             <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
-              <div style="display: flex; align-items: center; gap: 8px;">
-                <span style="font-weight: 700; color: var(--text-slate-800); font-size: 0.92rem;">${type}</span>
+              <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                <span style="font-weight: 800; color: var(--text-slate-800); font-size: 0.95rem;">${type}</span>
+                <span style="font-size: 0.72rem; font-weight: 700; color: #475569; background: #f1f5f9; padding: 2px 8px; border-radius: 6px; border: 1px solid #e2e8f0;">${groupName}</span>
                 ${rules.fy && rules.fy !== 'All' ? `<span style="font-size: 0.72rem; font-weight: 700; background: #dbeafe; color: #1e40af; padding: 2px 7px; border-radius: 10px;">FY ${rules.fy}</span>` : ''}
+                <span style="font-size: 0.72rem; color: #059669; background: #d1fae5; padding: 2px 6px; border-radius: 4px; font-weight: 700;">✓ In Entry Dropdown</span>
               </div>
               <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                ${dynamicTabSwitchHTML}
                 ${fySelectHTML}
-                <select onchange="updateTypeMode('${type}', this.value)" style="padding: 4px 8px; font-size: 0.82rem; border: 1px solid var(--border-slate-300); border-radius: 4px; outline: none; color: var(--text-slate-800); background: var(--bg-slate-50);">
+                <select onchange="updateTypeMode('${type.replace(/'/g, "\\'")}', this.value)" style="padding: 4px 8px; font-size: 0.82rem; border: 1px solid var(--border-slate-300); border-radius: 6px; outline: none; color: var(--text-slate-800); background: var(--bg-slate-50); font-weight: 600;">
                   <option value="Both" ${rules.mode === 'Both' ? 'selected' : ''}>Receipt & Payment</option>
                   <option value="Receipt" ${rules.mode === 'Receipt' ? 'selected' : ''}>Receipt Only</option>
                   <option value="Payment" ${rules.mode === 'Payment' ? 'selected' : ''}>Payment Only</option>
                 </select>
-                <label style="display: flex; align-items: center; gap: 6px; font-size: 0.82rem; margin: 0; cursor: pointer; color: var(--text-slate-600);">
-                  <input type="checkbox" ${rules.showSubtype ? 'checked' : ''} onchange="updateTypeRule('${type}', 'showSubtype', this.checked)" style="margin: 0; cursor: pointer;"> Subtypes?
+                <label style="display: flex; align-items: center; gap: 6px; font-size: 0.82rem; margin: 0; cursor: pointer; color: var(--text-slate-600); font-weight: 600;">
+                  <input type="checkbox" ${rules.showSubtype ? 'checked' : ''} onchange="updateTypeRule('${type.replace(/'/g, "\\'")}', 'showSubtype', this.checked)" style="margin: 0; cursor: pointer;"> Subtypes?
                 </label>
-                ${!isBuiltIn ? `<button onclick="deleteTransactionType('${type}')" style="background: none; border: none; color: #ef4444; cursor: pointer; font-size: 1rem;" title="Delete Type">🗑️</button>` : ''}
+                ${!isBuiltIn ? `<button onclick="deleteTransactionType('${type.replace(/'/g, "\\'")}')" style="background: #fee2e2; border: 1px solid #fecaca; color: #dc2626; border-radius: 6px; padding: 4px 8px; cursor: pointer; font-size: 0.85rem; font-weight: 700;" title="Delete Category">🗑️</button>` : ''}
               </div>
             </div>
             ${subtypesHTML}
           </div>
         `;
       });
+
+      if (renderedCount === 0) {
+        listEl.innerHTML = '<div style="color: #94a3b8; font-size: 0.9rem; text-align: center; padding: 24px;">No categories match the search query.</div>';
+      }
     }
 
-    function addTransactionType() {
+    async function addNewCategoryFromSettings() {
       const input = document.getElementById('newTypeName');
       if (!input) return;
       const val = input.value.trim();
-      if (!val) return;
-      if (globalFieldRules[val]) return alert('This transaction type already exists! 🏷️');
+      if (!val) {
+        alert('Please enter a valid Category Name! 🏷️');
+        return;
+      }
+      if (globalFieldRules[val]) {
+        alert('This category already exists! 🏷️');
+        return;
+      }
+
+      const modeSelect = document.getElementById('newTypeMode');
+      const mode = modeSelect ? modeSelect.value : 'Both';
+
+      const groupSelect = document.getElementById('newTypeGroup');
+      let grp = groupSelect ? groupSelect.value : 'Standalone';
+      if (grp === 'Custom') {
+        const customInput = document.getElementById('newTypeCustomGroup');
+        grp = customInput && customInput.value.trim() ? customInput.value.trim() : val;
+      } else if (grp === 'Standalone') {
+        grp = val;
+      }
 
       const allFyCheckbox = document.getElementById('newTypeAllFY');
       const fySelect = document.getElementById('newTypeFY');
       const isAllFy = allFyCheckbox ? allFyCheckbox.checked : true;
       const targetFy = isAllFy ? 'All' : (fySelect ? fySelect.value : 'All');
 
+      const dynamicTabCheckbox = document.getElementById('newTypeDynamicTabToggle');
+      const isDynamicTab = dynamicTabCheckbox ? dynamicTabCheckbox.checked : true;
+
+      // 1. Persist to PostgreSQL categories table via API
+      try {
+        const fetchFn = (typeof apiFetch === 'function') ? apiFetch : fetch;
+        const res = await fetchFn('/api/categories', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: val,
+            type: mode,
+            group_name: grp
+          })
+        });
+        if (!res.ok) {
+          console.warn('API /api/categories responded with status:', res.status);
+        }
+      } catch (err) {
+        console.error('Failed to save category to /api/categories:', err);
+      }
+
+      // 2. Configure Field Rules and Dynamic Tab
       globalFieldRules[val] = {
         showAccount: true,
         showAddress: false,
         showSubtype: false,
         showMonth: false,
-        mode: 'Both',
-        fy: targetFy
+        mode: mode,
+        fy: targetFy,
+        hasDynamicTab: isDynamicTab
       };
       if (!subTypesConfig[val]) subTypesConfig[val] = [];
 
@@ -5614,16 +5932,41 @@
       if (!globalSidebarOrder || globalSidebarOrder.length === 0) {
         globalSidebarOrder = defaultSidebarTabs.map(t => t.id);
       }
-      if (!globalSidebarOrder.includes(tabId)) {
-        const settingsIdx = globalSidebarOrder.indexOf('settingsTab');
-        if (settingsIdx !== -1) {
-          globalSidebarOrder.splice(settingsIdx, 0, tabId);
-        } else {
-          globalSidebarOrder.push(tabId);
+
+      if (isDynamicTab) {
+        if (!globalSidebarOrder.includes(tabId)) {
+          const settingsIdx = globalSidebarOrder.indexOf('settingsTab');
+          if (settingsIdx !== -1) {
+            globalSidebarOrder.splice(settingsIdx, 0, tabId);
+          } else {
+            globalSidebarOrder.push(tabId);
+          }
         }
+      } else {
+        globalSidebarOrder = globalSidebarOrder.filter(id => id !== tabId);
       }
 
       input.value = '';
+      if (document.getElementById('newTypeCustomGroup')) {
+        document.getElementById('newTypeCustomGroup').value = '';
+      }
+      if (document.getElementById('newTypeCustomGroupWrapper')) {
+        document.getElementById('newTypeCustomGroupWrapper').style.display = 'none';
+      }
+      if (groupSelect) groupSelect.value = 'Standalone';
+
+      // 3. Sync to settings storage
+      if (typeof db !== 'undefined' && db.collection) {
+        db.collection("settings").doc("field_rules").set(globalFieldRules).catch(console.error);
+        db.collection("settings").doc("subtypes").set(subTypesConfig).catch(console.error);
+        db.collection("settings").doc("sidebarOrder").set({ order: globalSidebarOrder }).catch(console.error);
+      }
+
+      // 4. Reload categories and update UI
+      if (typeof loadCategoriesFromApi === 'function') {
+        await loadCategoriesFromApi();
+      }
+
       renderSettingsTypesList();
       populateTypeDropdowns();
       if (typeof renderDynamicTabs === 'function') renderDynamicTabs();
@@ -5631,11 +5974,58 @@
       if (typeof applySidebarOrder === 'function') applySidebarOrder();
       if (typeof applyRBACUI === 'function') applyRBACUI();
 
-      // Automatically sync to Firestore
-      db.collection("settings").doc("field_rules").set(globalFieldRules).catch(console.error);
-      db.collection("settings").doc("subtypes").set(subTypesConfig).catch(console.error);
-      db.collection("settings").doc("sidebarOrder").set({ order: globalSidebarOrder }).catch(console.error);
+      if (typeof showAlert === 'function') {
+        showAlert(`Category "${val}" added to Entry screen ${isDynamicTab ? 'and Dynamic Tab created!' : 'successfully!'} 🎉`, 'success');
+      } else {
+        alert(`Category "${val}" added successfully! 🎉`);
+      }
     }
+    window.addNewCategoryFromSettings = addNewCategoryFromSettings;
+
+    function addTransactionType() {
+      addNewCategoryFromSettings();
+    }
+
+    function toggleCategoryDynamicTab(type, isEnabled) {
+      if (!globalFieldRules[type]) return;
+      globalFieldRules[type].hasDynamicTab = isEnabled;
+
+      const typeIdStr = type.replace(/[^a-zA-Z0-9]/g, '');
+      const tabId = 'dynamicTab_' + typeIdStr;
+
+      if (!globalSidebarOrder || globalSidebarOrder.length === 0) {
+        globalSidebarOrder = defaultSidebarTabs.map(t => t.id);
+      }
+
+      if (isEnabled) {
+        if (!globalSidebarOrder.includes(tabId)) {
+          const settingsIdx = globalSidebarOrder.indexOf('settingsTab');
+          if (settingsIdx !== -1) {
+            globalSidebarOrder.splice(settingsIdx, 0, tabId);
+          } else {
+            globalSidebarOrder.push(tabId);
+          }
+        }
+      } else {
+        globalSidebarOrder = globalSidebarOrder.filter(id => id !== tabId);
+      }
+
+      if (typeof db !== 'undefined' && db.collection) {
+        db.collection("settings").doc("field_rules").set(globalFieldRules).catch(console.error);
+        db.collection("settings").doc("sidebarOrder").set({ order: globalSidebarOrder }).catch(console.error);
+      }
+
+      renderSettingsTypesList();
+      if (typeof renderDynamicTabs === 'function') renderDynamicTabs();
+      if (typeof renderSettingsTabOrderList === 'function') renderSettingsTabOrderList();
+      if (typeof applySidebarOrder === 'function') applySidebarOrder();
+      if (typeof applyRBACUI === 'function') applyRBACUI();
+
+      if (typeof showAlert === 'function') {
+        showAlert(`Dynamic tab for "${type}" ${isEnabled ? 'enabled' : 'hidden'}! 📑`, 'info');
+      }
+    }
+    window.toggleCategoryDynamicTab = toggleCategoryDynamicTab;
 
     function updateTypeFY(type, val) {
       if (globalFieldRules[type]) {
@@ -5648,7 +6038,20 @@
     }
 
     function deleteTransactionType(type) {
-      showCustomConfirm('Are you sure you want to remove this transaction type? 🗑️', () => {
+      showCustomConfirm(`Are you sure you want to remove the category "${type}"? 🗑️<br><br><span style="font-size:0.85rem; color:var(--text-slate-500);">Existing transactions will remain safe.</span>`, async () => {
+        // Delete from categories table if found
+        const dbCats = window.dbCategories || [];
+        const matchingCat = dbCats.find(c => c.name === type);
+        if (matchingCat && matchingCat.id) {
+          try {
+            const fetchFn = (typeof apiFetch === 'function') ? apiFetch : fetch;
+            await fetchFn(`/api/categories/${matchingCat.id}`, { method: 'DELETE' });
+            window.dbCategories = dbCats.filter(c => c.id !== matchingCat.id);
+          } catch (e) {
+            console.warn('Failed to delete category from API:', e);
+          }
+        }
+
         delete globalFieldRules[type];
         if (subTypesConfig[type]) delete subTypesConfig[type];
 
@@ -5672,7 +6075,7 @@
         db.collection("settings").doc("subtypes").set(subTypesConfig).catch(console.error);
         db.collection("settings").doc("sidebarOrder").set({ order: globalSidebarOrder }).catch(console.error);
         db.collection("settings").doc("tabNames").set(globalCustomTabNames).catch(console.error);
-      }, "Remove Type", "Remove", true);
+      }, "Remove Category", "Remove", true);
     }
 
     function updateTypeRule(type, rule, isChecked) {
